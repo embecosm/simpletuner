@@ -14,6 +14,15 @@ parser = argparse.ArgumentParser(description='Explore compiler flag performance 
 parser.add_argument('-f', '--flag-baselines-file', default=None,
                     help='Specify file that contains a comma-separated file containing lines of <score,flag> tuples.')
 
+parser.add_argument('--cc-for-discovery', default=None,
+                    help="PLEASE make sure that this compiler is the same that you WorkerContext will be using!")
+
+parser.add_argument('--target-flags-file', default=None,
+                    help="Additional flags file that will be appended"
+                    " to generic flags  provided by the compiler. "
+                    "Typically you would put target-specific stuff here"
+                    ", e.g. -mtune, -mcpu, etc.");
+
 CC = "gcc";
 
 def debug(*args, **kwargs):
@@ -22,11 +31,11 @@ def debug(*args, **kwargs):
 
 def info(*args, **kwargs):
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
-    print("[info] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
+    print("[info]  [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
 
 def warn(*args, **kwargs):
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
-    print("[WARN] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
+    print("[WARN]  [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
 
 def error(*args, **kwargs):
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
@@ -762,9 +771,9 @@ def worker_func(worker_ctx, work_queue, result_queue):
             debug("Worker #{}: Succesfully compiled \"{}\"".format(idx, flags));
         else:
             warn("Worker #{}: Failed to compile \"{}\"".format(idx, flags));
-
             # Can't benchmark what we can't build: return.
-            return (flagpath, None);
+            result_queue.put((flagpath, None), block=False);
+            continue;
 
         score = worker_ctx.benchmark();
         if score is not None:
@@ -781,6 +790,8 @@ def create_job_from_flagpath(flagpath):
 
 def work():
     global args;
+    global CC;
+
     args = parser.parse_args();
 
     if args.flag_baselines_file is not None:
@@ -788,6 +799,13 @@ def work():
              .format(args.flag_baselines_file));
     else:
         info("No flag baselines file specified, will automatically generate flag baselines");
+
+    if args.cc_for_discovery is not None:
+        info("Will be using {} for flag baselines"\
+             .format(args.cc_for_discovery));
+        CC = args.cc_for_discovery;
+    else:
+        info("No C compiler specified, will use whatever is in path");
 
     # The WorkerContext class that we will be using
     worker_context_classname = "LooperWorkerContext";
@@ -819,6 +837,19 @@ def work():
     # it works at all.
     flags = [];
     all_gcc_flags = fetch_all_gcc_flags();
+
+    # If we were provided any target flags, append them now.
+    if args.target_flags_file is not None:
+        with open(args.target_flags_file) as target_flags_file:
+            for line in target_flags_file:
+                line = line.strip();
+
+                if len(line) == 0:
+                    continue;
+
+                debug("Appending target flag \"{}\"".format(line));
+                flags.append(line);
+
     # all_gcc_flags = all_gcc_flags[-100:-1];
 
     with mp.Pool(n_core_count) as pool:
