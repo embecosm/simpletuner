@@ -11,16 +11,18 @@ import queue; # Called "Queue" in Python 2
 
 parser = argparse.ArgumentParser(description='Explore compiler flag performance in parallel');
 
-parser.add_argument('-f', '--flag-baselines-file', default=None,
-                    help='Specify file that contains a comma-separated file containing lines of <score,flag> tuples.')
+parser.add_argument("-f", "--flag-baselines-file", default=None,
+                    help="Specify file that contains a comma-separated"
+                    "file containing lines of <score,flag> tuples.");
 
-parser.add_argument('--cc-for-discovery', default=None,
-                    help="PLEASE make sure that this compiler is the same that you WorkerContext will be using!")
+parser.add_argument("--cc-for-discovery", default=None,
+                    help="PLEASE make sure that this compiler"
+                    " is the same that you WorkerContext will be using!");
 
-parser.add_argument('--target-flags-file', default=None,
+parser.add_argument("--target-flags-file", default=None,
                     help="Additional flags file that will be appended"
-                    " to generic flags  provided by the compiler. "
-                    "Typically you would put target-specific stuff here"
+                    " to generic flags  provided by the compiler."
+                    " Typically you would put target-specific stuff here"
                     ", e.g. -mtune, -mcpu, etc.");
 
 CC = "gcc";
@@ -850,7 +852,7 @@ def work():
                 debug("Appending target flag \"{}\"".format(line));
                 flags.append(line);
 
-    # all_gcc_flags = all_gcc_flags[-100:-1];
+    all_gcc_flags = all_gcc_flags[-100:-1];
 
     with mp.Pool(n_core_count) as pool:
         all_gcc_flags_test_results = pool.map(check_gcc_flag, all_gcc_flags);
@@ -958,11 +960,22 @@ def work():
     else:
         results = [];
 
+        debug("Processing flags file \"{}\"..."\
+              .format(flags_file));
+
         with open(flags_file, "r") as flags_top:
             for line in flags_top:
                 line = line.strip();
                 debug("Processing line \"{}\"".format(line));
                 flag, score = line.split(',');
+                score = float(score);
+
+                debug("Now comparing {} to {}..."\
+                      .format(score, float("inf")));
+                if score == float("inf") or score == float("-inf"):
+                    debug("Found inf, omitting from results");
+                    continue;
+
                 results.append((flag, score));
         
         results.sort(key=lambda e: e[1], reverse=WorkerContext.better(2, 1));
@@ -992,8 +1005,6 @@ def work():
     ### Enter main loop:
     f_live_global_leaderboard = open(
         os.path.join(run_directory, "global_leaderboard.live"), "w");
-    f_final_global_leaderboard = open(
-        os.path.join(run_directory, "global_leaderboard.final"), "w");
 
     while True:
         # We're done
@@ -1016,9 +1027,19 @@ def work():
             info("All done, tested {} flag combinations."\
                   .format(n_tests));
 
+            f_final_global_leaderboard = open(
+                os.path.join(run_directory, "global_leaderboard.final"), "w");
+
             info("Global leaderboard:");
             for flagpath in global_leaderboard:
-                info("\t{} {}".format(lookup_flag_from_flagpath(root, flagpath).score, flagpath));
+                info("\t{},{}".format(" ".join(flagpath), lookup_flag_from_flagpath(root, flagpath).score));
+                print("{},{}".format(" ".join(flagpath), lookup_flag_from_flagpath(root, flagpath).score),
+                      file=f_final_global_leaderboard);
+
+                f_final_global_leaderboard.flush();
+
+            f_final_global_leaderboard.close();
+            f_live_global_leaderboard.close();
 
             break;
 
