@@ -368,9 +368,11 @@ def flatten_params(params):
         # Treat the unbounded parameters specially
         unbounded_p = v["min"] == 0 and v["max"] == 2147483647;
 
+        n_options = v["max"] - v["min"] + 1;
+
         if unbounded_p:
             if v["default"] == 0:
-                for i in range(0, 110, 10):
+                for i in range(0, 101, 5):
                     flags.append("--param={}={}".format(k, i));
 
             else:
@@ -379,12 +381,10 @@ def flatten_params(params):
                 for i in range(0, full_range + 1,
                                full_range // 10 if full_range >= 10 else 1):
                     flags.append("--param={}={}".format(k, i));
-                    
+
             continue;
 
-        n_options = v["max"] - v["min"] + 1;
-
-        if n_options <= 10:
+        if n_options <= 25:
             for i in range(v["min"], v["max"] + 1):
                 flags.append("--param={}={}".format(k, i));
         else:
