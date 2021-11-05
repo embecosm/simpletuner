@@ -11,7 +11,7 @@ import queue; # Called "Queue" in Python 2
 
 parser = argparse.ArgumentParser(description='Explore compiler flag performance in parallel');
 
-parser.add_argument("-f", "--flag-baselines-file", default=None,
+parser.add_argument("--flag-baselines-file", default=None,
                     help="Specify file that contains a comma-separated"
                     "file containing lines of <score,flag> tuples.");
 
@@ -42,6 +42,10 @@ def warn(*args, **kwargs):
 def error(*args, **kwargs):
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
     print("[ERROR] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
+
+def fatal(*args, **kwargs):
+    now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
+    print("[FATAL] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
 
 def fetch_gcc_version():
     res = subprocess.Popen([CC, "-v"],
@@ -550,16 +554,25 @@ class SweRVWorkerContext:
     def __init__(self, idx, workspace):
         self.idx = idx;
         self.workspace = workspace;
+
         self.env = os.environ.copy();
         self.env["RV_ROOT"] = self.workspace;
+
         self.re_ticks = re.compile(r"Total ticks      \: ([0-9]+)");
 
         self.march = "rv32imc";
         self.mabi = "ilp32";
 
     def init_workspace(self):
-        print("[DEBUG] Worker #{}: Creating workspace in {}"\
-              .format(self.idx, self.workspace), file=sys.stderr);
+        debug("Worker #{}: Creating workspace in {}"\
+              .format(self.idx, self.workspace));
+
+        if "SWERV_SOURCE_TAR" not in os.environ:
+            error("Worker #{}: Please set the environment variable \"SWERV_SOURCE_TAR\""
+                  " to contain the path to a prebuilt Cores-SweRV.".format(self.idx));
+            return False;
+
+        self.SOURCE_TAR = os.environ["SWERV_SOURCE_TAR"];
 
         cmd = ["tar", "-xf", self.SOURCE_TAR,
                "--directory", self.workspace];
@@ -572,13 +585,24 @@ class SweRVWorkerContext:
         stdout, stderr = res.communicate();
 
         if res.returncode != 0:
-            print("[ERROR] Worker #{}: init_workspace(): Failed to extract:"\
-                  .format(self.idx, file=sys.stderr), file=sys.stderr);
-            print(stderr.decode("utf-8").strip());
+            error("[ERROR] Worker #{}: init_workspace(): Failed to extract:"\
+                  .format(self.idx, file=sys.stderr));
+            error(stderr.decode("utf-8").strip());
             return False;
 
         return True;
     
+    def better(x, y):
+        # Return True if score `x` is better than score `y`
+        return x < y;
+
+    def worst_possible_result():
+        # Return the worst possible result that is still
+        # sortable. This is used internally to deal with tests that
+        # fail, and thus should be pessimized as much as possible from
+        # being selected to run again.
+        return float('inf');
+
     def compile(self, flags):
         clean = ["rm", "-f",
                  "cmark_iccm.dis",
@@ -598,22 +622,22 @@ class SweRVWorkerContext:
         stdout, stderr = res.communicate();
 
         if res.returncode != 0:
-            print("[ERROR] Worker #{} [{}]: compile(): Failed to clean directory:"\
-                  .format(self.idx, self.workspace, file=sys.stderr));
-            print(stderr.decode("utf-8").strip());
+            error("Worker #{}: compile(): Failed to clean directory:"\
+                  .format(self.idx));
+            error(stderr.decode("utf-8").strip());
             return False;
 
         make = ["make", "-f", "tools/Makefile",
                 "RV_ROOT={}".format(self.workspace),
-               "GCC_PREFIX=riscv32-unknown-elf",
-               "target=high_perf", "TEST=cmark_iccm",
+                "GCC_PREFIX=riscv32-unknown-elf",
+                "target=high_perf", "TEST=cmark_iccm",
                 "TEST_CFLAGS={}".format(" ".join(["-march=" + self.march,
                                                   "-mabi=" + self.mabi,
                                                   "-Ofast"] + flags)),
                 "program.hex"];
 
-        print("[DEBUG] Worker #{} [{}]: compile(): Executing \"{}\""\
-              .format(self.idx, self.workspace, " ".join(make)), file=sys.stderr);
+        debug("Worker #{}: compile(): Executing \"{}\""\
+              .format(self.idx, " ".join(make)));
 
         res = subprocess.Popen(make, cwd=self.workspace, env=self.env,
                                stdin=subprocess.DEVNULL,
@@ -623,22 +647,25 @@ class SweRVWorkerContext:
         stdout, stderr = res.communicate();
 
         if res.returncode != 0:
-            print("[ERROR] Worker #{} [{}]: compile(): Failed to compile:"\
-                  .format(self.idx, self.workspace, file=sys.stderr));
-            print(stderr.decode("utf-8").strip());
+            error("Worker #{} [{}]: compile(): Failed to compile:"\
+                  .format(self.idx, self.workspace));
+            error(stderr.decode("utf-8").strip());
             return False;
 
         return True;
 
     def benchmark(self):
-        run();
+        return self.run();
 
     def run(self):
         make = ["make", "-f", "tools/Makefile",
                 "RV_ROOT={}".format(self.workspace),
-               "GCC_PREFIX=riscv32-unknown-elf",
-               "target=high_perf", "TEST=cmark_iccm",
+                "GCC_PREFIX=riscv32-unknown-elf",
+                "target=high_perf", "TEST=cmark_iccm",
                 "verilator"];
+
+        debug("Worker #{}: run(): Executing \"{}\""\
+              .format(self.idx, " ".join(make)));
 
         res = subprocess.Popen(make, cwd=self.workspace,
                                stdin=subprocess.DEVNULL,
@@ -665,8 +692,8 @@ class SweRVWorkerContext:
         if score is None:
             warn("Failed to run");
         else:
-            print("[DEBUG] Worker #{} [{}]: run(): Got score \"{}\""\
-                  .format(self.idx, self.workspace, str(score)), file=sys.stderr);
+            debug("Worker #{}: [{}]: run(): Got score \"{}\""\
+                  .format(self.idx, self.workspace, str(score)));
 
         return score;
 
@@ -766,23 +793,23 @@ def worker_func(worker_ctx, work_queue, result_queue):
 
         flagpath = job;
         flags = " ".join(flagpath)
-        debug("Worker #{}: Got job \"{}\"".format(idx, flags));
+        debug("Worker #{}: Got job with flags \"{}\"".format(idx, flags));
 
         compile_ok = worker_ctx.compile(flagpath);
         if compile_ok:
-            debug("Worker #{}: Succesfully compiled \"{}\"".format(idx, flags));
+            debug("Worker #{}: Succesfully compiled with flags \"{}\"".format(idx, flags));
         else:
-            warn("Worker #{}: Failed to compile \"{}\"".format(idx, flags));
+            warn("Worker #{}: Failed to compile with flags \"{}\"".format(idx, flags));
             # Can't benchmark what we can't build: return.
             result_queue.put((flagpath, None), block=False);
             continue;
 
         score = worker_ctx.benchmark();
         if score is not None:
-            debug("Worker #{}: Succesful benchmark, got score {} for flags \"{}\""\
+            debug("Worker #{}: Succesful benchmark, got score {} with flags \"{}\""\
                   .format(idx, str(score), flags));
         else:
-            warm("Worker #{}: Failed to benchmark \"{}\"".format(idx, flags));
+            warn("Worker #{}: Failed to benchmark with flags \"{}\"".format(idx, flags));
 
         result = (flagpath, score);
         result_queue.put(result, block=False);
@@ -797,21 +824,25 @@ def work():
     args = parser.parse_args();
 
     if args.flag_baselines_file is not None:
-        info("Will be using {} for flag baselines"\
+        info("Will be using \"{}\" for flag baselines"\
              .format(args.flag_baselines_file));
     else:
         info("No flag baselines file specified, will automatically generate flag baselines");
 
     if args.cc_for_discovery is not None:
-        info("Will be using {} for flag baselines"\
+        info("Will be using \"{}\" for flag baselines"\
              .format(args.cc_for_discovery));
         CC = args.cc_for_discovery;
     else:
         info("No C compiler specified, will use whatever is in path");
 
     # The WorkerContext class that we will be using
-    worker_context_classname = "LooperWorkerContext";
+    worker_context_classname = "SweRVWorkerContext";
     WorkerContext = getattr(sys.modules[__name__], worker_context_classname)
+    if WorkerContext is None:
+        error("Unknown WorkerContext classname: \"{}\"".\
+              format(worker_context_classname));
+        sys.exit(1);
 
     n_tests = 0;
     n_core_count = mp.cpu_count();
@@ -852,7 +883,7 @@ def work():
                 debug("Appending target flag \"{}\"".format(line));
                 flags.append(line);
 
-    all_gcc_flags = all_gcc_flags[-100:-1];
+    all_gcc_flags = all_gcc_flags[-20:-1];
 
     with mp.Pool(n_core_count) as pool:
         all_gcc_flags_test_results = pool.map(check_gcc_flag, all_gcc_flags);
@@ -862,7 +893,8 @@ def work():
             flags.append(flag);
 
     if len(flags) == 0:
-        error("After testing \"{}\" flags for function, we're left with 0 working flags! Maybe you're missing the C compiler or something?");
+        error("After testing \"{}\" flags for function, we're left with 0"
+              " working flags! Maybe you're missing the C compiler or something?");
         sys.exit(1);
 
     ### Phase 2: Flag performance measurement
@@ -882,7 +914,8 @@ def work():
             sys.exit(1);
 
     # Create a unique run directory
-    random_suffix = "".join([random.choice(string.ascii_letters + "0123456789") for _ in range(4)]);
+    random_suffix = "".join(
+        [random.choice(string.ascii_letters + "0123456789") for _ in range(4)]);
 
     run_directory \
         = os.path.join(
@@ -918,7 +951,7 @@ def work():
         sys.exit(1);
 
     for idx, worker in enumerate(workers):
-        debug("Starting worker#{}".format(idx));
+        debug("Starting Worker #{}".format(idx));
         worker.start();
 
     debug("Started {} workers".format(n_core_count));
@@ -941,10 +974,12 @@ def work():
             info("{} flag tests left".format(n_active_jobs));
 
             if score is None:
-                if WorkerContext.better(0.0, float('-inf')):
-                    score = float('-inf');
-                else:
-                    score = float('inf');
+                score = WorkerContext.worst_possible_result();
+
+                # if WorkerContext.better(0.0, float('-inf')):
+                #     score = float('-inf');
+                # else:
+                #     score = float('inf');
 
             results.append((flagpath[0], score));
 
@@ -956,6 +991,14 @@ def work():
 
         # Root flag from which we will be searching
         root = Flag(None, flags);
+
+        # Also, create and set the child scores, since we've already
+        # calculated them for the baselines.
+        for flag, score in results:
+            flagpath = [flag];
+
+            child = lookup_flag_from_flagpath(root, flagpath);
+            child.score = score;
 
     else:
         results = [];
@@ -970,10 +1013,8 @@ def work():
                 flag, score = line.split(',');
                 score = float(score);
 
-                debug("Now comparing {} to {}..."\
-                      .format(score, float("inf")));
-                if score == float("inf") or score == float("-inf"):
-                    debug("Found inf, omitting from results");
+                if score == WorkerContext.worst_possible_result():
+                    debug("Found bad result, omitting from results");
                     continue;
 
                 results.append((flag, score));
@@ -984,6 +1025,14 @@ def work():
 
         # Root flag from which we will be searching
         root = Flag(None, flags);
+
+        # Also, create and set the child scores, since we've already
+        # calculated them for the baselines.
+        for flag, score in results:
+            flagpath = [flag];
+
+            child = lookup_flag_from_flagpath(root, flagpath);
+            child.score = score;
 
     # Regardless of whether or not we generated the top flags file
     # manually, we always write it out to our run directory.
@@ -1002,6 +1051,45 @@ def work():
 
     debug("Put one job on the queue \"{}\"".format(job));
 
+    flagpath, score = result_queue.get(block=True);
+    n_active_jobs -= 1;
+
+    debug("Root: got score \"{}\" (type {})".format(score, type(score)));
+
+    if score is None:
+        fatal("root test failed");
+        sys.exit(1);
+
+    # Make sure to record the root flag on the global leaderboard (it
+    # may be the case that the root flag is the only flag worth
+    # running, if all the root flag's children have a worse score than
+    # their parent.
+    global_leaderboard.append(flagpath);
+
+    # ...However, we do _not_ put the root flag on the `leaderboard`,
+    # because by definition all of its children will have been
+    # considered, and thus it is no longer eligible for exploitation.
+
+    debug("root.score = {}".format(score));
+    root.score = score;
+
+    # Now that we have a root score, populate the leaderboard if the
+    # score of the given child is `better` than that of the root
+    # score.
+    for child_flag in root.flags:
+        if WorkerContext.better(child.score, root.children[child_flag].score):
+            debug("Leaderboard init: child \"{}\" score {} is better "
+                  "than root score of {}, adding to leaderboard"\
+                  .format(str(child), child.score, root.score));
+
+            flagpath = [str(child_flag)];
+            leaderboard.append(flagpath)
+
+    leaderboard.sort(key=lambda flagpath: lookup_flag_from_flagpath(root, flagpath).score);
+    debug("Leaderboard now:");
+    for flagpath in leaderboard:
+        print(" ".join(flagpath));
+
     ### Enter main loop:
     f_live_global_leaderboard = open(
         os.path.join(run_directory, "global_leaderboard.live"), "w");
@@ -1017,9 +1105,9 @@ def work():
                 work_queue.put(None);
             
             for idx, worker in enumerate(workers):
-                debug("Trying to exit worker#{}...".format(idx));
+                debug("Trying to exit Worker #{}...".format(idx));
                 worker.join();
-                debug("Exited worker#{}".format(idx));
+                debug("Exited Worker #{}".format(idx));
 
             work_queue.close();
             result_queue.close()
@@ -1080,10 +1168,12 @@ def work():
                 # This indicates that the test failed. So we want to
                 # give it the most pessimistic score possible, being
                 # either -inf or inf - work out which.
-                if WorkerContext.better(0.0, float('-inf')):
-                    flag.score = float('-inf');
-                else:
-                    flag.score = float('inf');
+                return WorkerContext.worst_possible_result();
+
+                # if WorkerContext.better(0.0, float('-inf')):
+                #     flag.score = float('-inf');
+                # else:
+                #     flag.score = float('inf');
 
             parent_flag = lookup_parent_flag_from_flagpath(root, flagpath);
             # debug("Got parent_flag \"{}\" for flagpath \"{}\"".format(parent_flag, flagpath));
