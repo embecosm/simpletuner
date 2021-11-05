@@ -1174,7 +1174,7 @@ def work():
                 # This indicates that the test failed. So we want to
                 # give it the most pessimistic score possible, being
                 # either -inf or inf - work out which.
-                return WorkerContext.worst_possible_result();
+                flag.score = WorkerContext.worst_possible_result();
 
                 # if WorkerContext.better(0.0, float('-inf')):
                 #     flag.score = float('-inf');
