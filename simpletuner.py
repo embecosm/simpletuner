@@ -883,7 +883,7 @@ def work():
                 debug("Appending target flag \"{}\"".format(line));
                 flags.append(line);
 
-    all_gcc_flags = all_gcc_flags[-20:-1];
+    # all_gcc_flags = all_gcc_flags[-20:-1];
 
     with mp.Pool(n_core_count) as pool:
         all_gcc_flags_test_results = pool.map(check_gcc_flag, all_gcc_flags);
