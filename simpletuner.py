@@ -1077,13 +1077,19 @@ def work():
     # score of the given child is `better` than that of the root
     # score.
     for child_flag in root.flags:
-        if WorkerContext.better(child.score, root.children[child_flag].score):
+        child = root.children[child_flag];
+
+        if WorkerContext.better(child.score, root.score):
             debug("Leaderboard init: child \"{}\" score {} is better "
                   "than root score of {}, adding to leaderboard"\
-                  .format(str(child), child.score, root.score));
+                  .format(child_flag, child.score, root.score));
 
-            flagpath = [str(child_flag)];
+            flagpath = [child_flag];
             leaderboard.append(flagpath)
+        else:
+            debug("Leaderboard init: child \"{}\" score {} is not better "
+                  "than root score of {}, adding to leaderboard"\
+                  .format(child_flag, child.score, root.score));
 
     leaderboard.sort(key=lambda flagpath: lookup_flag_from_flagpath(root, flagpath).score);
     debug("Leaderboard now:");
