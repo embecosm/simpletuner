@@ -22,6 +22,9 @@ parser.add_argument("-j", "--processes", type=greater_than_one,
                     default=None, # Will use mp.cpu_count();
                     help="Number of processes to spawn");
 
+parser.add_argument("--context", default=None,
+                    help="Specify which \"backend\" to use. This is a user-defined classname.");
+
 parser.add_argument("--flag-baselines-file", default=None,
                     help="Specify file that contains a comma-separated"
                     "file containing lines of <score,flag> tuples.");
@@ -41,28 +44,92 @@ parser.add_argument("--setup-workspace-only", action="store_true",
                     " worker thread. Useful for when debugging the"
                     " WorkerContext.init_workspace procedure.");
 
-# CC = "gcc";
-CC = r'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\cl.exe';
+CC = "gcc";
+# CC = r'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\cl.exe';
+
+workspace_file_all = None;
+workspace_file_stdout = None;
+workspace_file_stderr = None;
 
 def debug(*args, **kwargs):
+    global workspace_file_all;
+    global workspace_file_stdout;
+    global workspace_file_stderr;
+
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
+
     print("[debug] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
+    if workspace_file_all:
+        print("[debug] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_all);
+        workspace_file_all.flush();
+
+    if workspace_file_stderr:
+        print("[debug] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_stderr);
+        workspace_file_stderr.flush();
 
 def info(*args, **kwargs):
+    global workspace_file_all;
+    global workspace_file_stdout;
+    global workspace_file_stderr;
+
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
-    print("[info]  [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
+    print("[info] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stdout);
+
+    if workspace_file_all:
+        print("[info]  [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_all);
+        workspace_file_all.flush();
+
+    if workspace_file_stdout:
+        print("[info]  [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_stdout);
+        workspace_file_stdout.flush();
 
 def warn(*args, **kwargs):
+    global workspace_file_all;
+    global workspace_file_stdout;
+    global workspace_file_stderr;
+
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
-    print("[WARN]  [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
+    print("[WARN] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stdout);
+
+    if workspace_file_all:
+        print("[WARN] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_all);
+        workspace_file_all.flush();
+
+    if workspace_file_stderr:
+        print("[WARN] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_stderr);
+        workspace_file_stderr.flush();
 
 def error(*args, **kwargs):
+    global workspace_file_all;
+    global workspace_file_stdout;
+    global workspace_file_stderr;
+
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
     print("[ERROR] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
 
+    if workspace_file_all:
+        print("[ERROR] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_all);
+        workspace_file_all.flush();
+
+    if workspace_file_stderr:
+        print("[ERROR] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_stderr);
+        workspace_file_stderr.flush();
+
 def fatal(*args, **kwargs):
+    global workspace_file_all;
+    global workspace_file_stdout;
+    global workspace_file_stderr;
+
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
     print("[FATAL] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=sys.stderr);
+
+    if workspace_file_all:
+        print("[FATAL] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_all);
+        workspace_file_all.flush();
+
+    if workspace_file_stderr:
+        print("[FATAL] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_stderr);
+        workspace_file_stderr.flush();
 
 def fetch_gcc_version():
     res = subprocess.Popen([CC, "-v"],
@@ -674,7 +741,7 @@ work (void)
               .format(self.idx, section));
 
     def size_find_size_of_section(self):
-        cmd = ["size", "./looper"];
+        cmd = ["size", "./work"];
 
         res = subprocess.Popen(cmd, cwd=self.workspace,
                                stdin=subprocess.DEVNULL,
@@ -985,8 +1052,14 @@ def work():
         info("No C compiler specified, will use whatever is in path");
 
     # The WorkerContext class that we will be using
-    worker_context_classname = "ExampleWorkerContext";
+    if args.context is None:
+        warn("No worker context specified, using ExampleWorkerContext");
+        worker_context_classname = "ExampleWorkerContext";
+    else:
+        worker_context_classname = args.context;
+
     WorkerContext = getattr(sys.modules[__name__], worker_context_classname)
+
     if WorkerContext is None:
         error("Unknown WorkerContext classname: \"{}\"".\
               format(worker_context_classname));
@@ -1083,6 +1156,14 @@ def work():
         sys.exit(1);
 
     os.mkdir(run_directory);
+
+    # Create log files
+    global workspace_file_all;
+    workspace_file_all = open(os.path.join(run_directory, "all.log"), "w");
+    global workspace_file_stdout;
+    workspace_file_stdout = open(os.path.join(run_directory, "stdout.log"), "w");
+    global workspace_file_stderr;
+    workspace_file_stderr = open(os.path.join(run_directory, "stderr.log"), "w");
 
     worker_ctxs = [];
     for idx in range(n_core_count):
@@ -1261,10 +1342,10 @@ def work():
     for flagpath in leaderboard:
         print(" ".join(flagpath));
 
-    ### Enter main loop:
     f_live_global_leaderboard = open(
         os.path.join(run_directory, "global_leaderboard.live"), "w");
 
+    ### Enter main loop:
     while True:
         # We're done
         if n_active_jobs == 0 \
@@ -1371,8 +1452,19 @@ def work():
 
             # Always store the result in the `global_leaderboard`
             # FIXME: sorted insert
+            if len(global_leaderboard) > 0:
+                prev_best_score = global_leaderboard[0];
+            else:
+                prev_best_score = None;
+
             global_leaderboard.append(flagpath);
             global_leaderboard.sort(key=lambda path: lookup_flag_from_flagpath(root, path).score);
+
+            curr_best_score = global_leaderboard[0];
+
+            if curr_best_score != prev_best_score:
+                info("New best flag: \"{}\", score {}"\
+                     .format(" ".join(best_flagpath), best_flag.score));
 
             # Also write it out to the live leaderboard file, incase
             # we crash or something.
@@ -1395,9 +1487,7 @@ def work():
         # If the best flag is now different, switch to exploring it instead.
         if best_flagpath != current_best_flagpath:
             best_flagpath = current_best_flagpath;
-            
             best_flag = lookup_flag_from_flagpath(root, best_flagpath);
-            
             best_flag_children_iterator = best_flag.create_iterator();
 
         # Get next job
