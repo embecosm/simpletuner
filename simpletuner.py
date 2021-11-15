@@ -44,8 +44,8 @@ parser.add_argument("--setup-workspace-only", action="store_true",
                     " worker thread. Useful for when debugging the"
                     " WorkerContext.init_workspace procedure.");
 
-CC = "gcc";
-# CC = r'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\cl.exe';
+# CC = "gcc";
+CC = r'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\cl.exe';
 
 workspace_file_all = None;
 workspace_file_stdout = None;
@@ -541,6 +541,63 @@ def check_gcc_flag(flag):
 
 import tempfile;
 
+def get_env_vc():
+    BAT_SOURCE = """\
+@echo off
+call "{}" > NUL
+set
+""";
+
+    if "comspec" not in os.environ:
+        print("Failed to find comspec in environment, aborting");
+        sys.exit(1);
+
+    comspec = os.environ["comspec"];
+    vcvarsall = r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat";
+
+    file = tempfile.NamedTemporaryFile("w", suffix=".bat");
+    # print("file: {}".format(file));
+
+    with tempfile.TemporaryDirectory() as cwd:
+        script = open(os.path.join(cwd, "get-env.bat"), "w");
+        script.write(BAT_SOURCE.format(vcvarsall));
+        
+        cmd = [comspec,
+               "/c",
+               script.name];
+
+        # Windows won't execute our script unless we close all open handles to it
+        script.close();
+
+        CREATE_NO_WINDOW = 0x08000000;
+
+        run = subprocess.Popen(cmd, creationflags=CREATE_NO_WINDOW,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE);
+
+        stdout, stderr = run.communicate();
+
+        if run.returncode != 0:
+            print("Failed to execute \"{}\":".format(" ".join(cmd)));
+            print(stderr.decode("utf-8"));
+            sys.exit(1);
+
+    # print("Got output:");
+    # print(stdout.decode("utf-8"));
+    # sys.exit(0);
+    
+    env_vc = dict();
+    for line in stdout.decode("utf-8").split('\n'):
+        line = line.strip();
+        
+        if len(line) == 0:
+            continue;
+
+        k, v = line.split('=', 1);
+        env_vc[k] = v;
+
+    return env_vc;
+
 def check_msvc_flag(flag):
     test_c = "void f() { }\n";
 
@@ -594,7 +651,6 @@ def check_msvc_flag(flag):
 class ExampleWorkerContext:
     MAIN_C = \
 """
-#include <stdlib.h>
 #include <stdio.h>
 
 #define ELEMS (1 << 10)
@@ -616,7 +672,7 @@ main (void)
 
     WORK_C = \
 """
-#include <stddef.h>
+#include <stdio.h>
 
 extern size_t elems;
 extern struct { float x, y, z, w; } src[], dst[];
@@ -646,6 +702,12 @@ work (void)
         with open(os.path.join(self.workspace, "work.c"), "w") as file:
             file.write(self.WORK_C);
 
+        if sys.platform == "win32":
+            debug("Scraping Visual Studio environment variables...")
+            self.env = get_env_vc();
+        else:
+            self.env = os.environ.copy();
+
         info("Worker #{}: Succesfully setup workspace".format(self.idx));
         return True;
     
@@ -661,26 +723,46 @@ work (void)
         return float('inf');
 
     def compile(self, flags):
+        fstdout = open(os.path.join(self.workspace, "stdout.log"), "ab");
+        fstderr = open(os.path.join(self.workspace, "stderr.log"), "ab");
+
         if sys.platform.startswith('linux'):
             cmd = [CC, "-Ofast", "-o", "work", "main.c", "work.c"] + flags;
 
         elif sys.platform == 'win32':
             cmd = [CC, "main.c", "work.c", "/Fe:work.exe"] + flags;
 
+        else:
+            error("Invalid platform for compile(): \"{}\""\
+                  .format(sys.platform));
+            return None;
+
         debug("Worker #{} [{}]: compile(): Executing \"{}\""\
               .format(self.idx, self.workspace, " ".join(cmd)));
 
+        # for k, v in self.env.items():
+        #     print("{}: {}".format(k, v));
+        print("INCLUDE: {}".format(self.env["INCLUDE"]))
+
         res = subprocess.Popen(cmd, cwd=self.workspace,
+                               env=self.env,
                                stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE);
 
         stdout, stderr = res.communicate();
 
+        fstdout.write(stdout);
+        fstderr.write(stderr);
+
+        fstdout.close();
+        fstderr.close();
+
         if res.returncode != 0:
             error("Worker #{} [{}]: compile(): Exit code {}: Failed to compile:"\
                   .format(self.idx, self.workspace, res.returncode));
             print(stderr.decode("utf-8").strip());
+            print(stdout.decode("utf-8").strip());
             return False;
 
         return True;
@@ -693,6 +775,9 @@ work (void)
             cmd = ["./work"];
         elif sys.platform == 'win32':
             cmd = ["work.exe"];
+
+        debug("Worker #{} [{}]: run(): Executing \"{}\""\
+              .format(self.idx, self.workspace, " ".join(cmd)));
 
         start = time.time();
         res = subprocess.Popen(cmd, cwd=self.workspace,
@@ -713,9 +798,14 @@ work (void)
     def dumpbin_find_size_of_section(self):
         section = ".text";
 
-        cmd = ["dumpbin.exe", "/headers", "work.exe"];
+        dumpbin = r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\dumpbin.exe";
+        cmd = [dumpbin, "/headers", "work.exe"];
+
+        debug("Worker #{} [{}]: dumpbin_find_size_of_section(): Executing \"{}\""\
+              .format(self.idx, self.workspace, " ".join(cmd)));
 
         res = subprocess.Popen(cmd, cwd=self.workspace,
+                               env=self.env,
                                stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE);
@@ -1178,8 +1268,11 @@ def work():
                for worker_ctx in worker_ctxs];
     debug("Done creating {} workers".format(n_core_count));
 
-    with mp.Pool(n_core_count) as pool:
-        init_workspaces_ok = pool.map(WorkerContext.init_workspace, worker_ctxs);
+    # with mp.Pool(n_core_count) as pool:
+    #     init_workspaces_ok = pool.map(WorkerContext.init_workspace, worker_ctxs);
+    init_workspaces_ok = [];
+    for worker_ctx in worker_ctxs:
+        init_workspaces_ok.append(worker_ctx.init_workspace());
 
     if any([not ok for ok in init_workspaces_ok]):
         error("Atleast one workspace failed to initialize its workspace directory, aborting");
