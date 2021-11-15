@@ -11,6 +11,17 @@ import queue; # Called "Queue" in Python 2
 
 parser = argparse.ArgumentParser(description='Explore compiler flag performance in parallel');
 
+def greater_than_one(value):
+    ivalue = int(value)
+    if ivalue < 1:
+        raise argparse.ArgumentTypeError(
+            "{} must be an integer greater than 1".format(value));
+    return ivalue
+
+parser.add_argument("-j", "--processes", type=greater_than_one,
+                    default=None, # Will use mp.cpu_count();
+                    help="Number of processes to spawn");
+
 parser.add_argument("--flag-baselines-file", default=None,
                     help="Specify file that contains a comma-separated"
                     "file containing lines of <score,flag> tuples.");
@@ -25,7 +36,13 @@ parser.add_argument("--target-flags-file", default=None,
                     " Typically you would put target-specific stuff here"
                     ", e.g. -mtune, -mcpu, etc.");
 
-CC = "gcc";
+parser.add_argument("--setup-workspace-only", action="store_true",
+                    help="Exit after setting up a workspace for each"
+                    " worker thread. Useful for when debugging the"
+                    " WorkerContext.init_workspace procedure.");
+
+# CC = "gcc";
+CC = r'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\cl.exe';
 
 def debug(*args, **kwargs):
     now = datetime.now().strftime("%d-%b-%Y %H:%M:%S");
@@ -411,17 +428,77 @@ def fetch_all_gcc_flags():
 
     return flags;
 
+def fetch_all_msvc_flags():
+    return [
+        "/O1",
+        "/O2",
+        "/Od",
+        "/Og",
+        "/Ot",
+        "/Os",
+        "/favor:blend",
+        "/favor:AMD64",
+        "/favor:INTEL64",
+        "/favor:ATOM"
+    ];
+
+def fetch_all_cc_flags():
+    if sys.platform.startswith('linux'):
+        return fetch_all_gcc_flags();
+    elif sys.platform == 'win32':
+        return fetch_all_msvc_flags();
+
+def check_cc_flag(flag):
+    if sys.platform.startswith('linux'):
+        return check_gcc_flag(flag);
+    elif sys.platform == 'win32':
+        return check_msvc_flag(flag);
+
 def check_gcc_flag(flag):
     cmd = [CC,
-           "-fno-diagnostics-color",
-           "-S", "-o", "/dev/null", flag,
-           "-x", "c", "-"];
+           "-fno-diagnostics-color", # Don't leave control codes in stdout/stderr
+           "-S", # It's not our responsibility to worry about the assembler or linker
+           "-o", "/dev/null", # No output
+           flag,
+           "-x", "c", # Must specify language if taking input from stdin
+           "-" # Take input from stdin
+           ];
 
     res = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE);
 
     stdout, stderr = res.communicate();
+
+    return (flag, res.returncode);
+
+import tempfile;
+
+def check_msvc_flag(flag):
+    test_c = "void f() { }\n";
+
+    tempdir = tempfile.TemporaryDirectory();
+    cwd = tempdir.name;
+
+    test_filename = os.path.join(cwd, "main.c");
+    with open(test_filename, "w") as file:
+        file.write(test_c);
+
+    cmd = [CC,
+           "/c", # Compile only, no link
+           flag,
+           test_filename];
+
+    res = subprocess.Popen(cmd, cwd=cwd,
+                           stdin=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE);
+
+    stdout, stderr = res.communicate();
+
+    debug("MSVC: Executed \"{}\", output:".format(" ".join(cmd)));
+    debug("stdout:", stdout.decode("utf-8"));
+    debug("stderr:", stderr.decode("utf-8"));
 
     return (flag, res.returncode);
 
@@ -447,37 +524,60 @@ def check_gcc_flag(flag):
 
 #     return flags;
 
-class LooperWorkerContext:
+class ExampleWorkerContext:
+    MAIN_C = \
+"""
+#include <stdlib.h>
+#include <stdio.h>
+
+#define ELEMS (1 << 10)
+
+size_t elems = ELEMS;
+struct { float x, y, z, w; } src[ELEMS], dst[ELEMS];
+
+void work (void);
+
+int
+main (void)
+{
+  for (int i = 0; i < 1E6; ++i)
+    work ();
+
+  return 0;
+}
+""";
+
+    WORK_C = \
+"""
+#include <stddef.h>
+
+extern size_t elems;
+extern struct { float x, y, z, w; } src[], dst[];
+
+void
+work (void)
+{
+  for (size_t i = 0; i < elems; ++i)
+    dst[i] = src[i];
+}
+""";
+
     def __init__(self, idx, workspace):
         self.idx = idx;
         self.workspace = workspace;
 
+        if sys.platform == 'win32':
+            self.re_text_size = re.compile(r"\s*([0-9a-fA-F]+)\svirtual size");
+
     def init_workspace(self):
-        if "SIMPLETUNER_SOURCE_TAR" not in os.environ:
-            error("Worker #{}: Please set the environment variable \"SIMPLETUNER_SOURCE_TAR\""
-                  " to contain the path to the looper.tar.gz sources".format(self.idx));
-            return False;
-
-        self.SOURCE_TAR = os.environ["SIMPLETUNER_SOURCE_TAR"];
-
         debug("Worker #{}: Creating workspace in {}"\
               .format(self.idx, self.workspace));
 
-        cmd = ["tar", "-xf", self.SOURCE_TAR,
-               "--directory", self.workspace];
-        
-        res = subprocess.Popen(cmd, cwd=self.workspace,
-                               stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE);
+        with open(os.path.join(self.workspace, "main.c"), "w") as file:
+            file.write(self.MAIN_C);
 
-        stdout, stderr = res.communicate();
-
-        if res.returncode != 0:
-            error("[ERROR] Worker #{}: init_workspace(): Failed to extract:"\
-                  .format(self.idx));
-            error(stderr.decode("utf-8").strip());
-            return False;
+        with open(os.path.join(self.workspace, "work.c"), "w") as file:
+            file.write(self.WORK_C);
 
         info("Worker #{}: Succesfully setup workspace".format(self.idx));
         return True;
@@ -486,9 +586,20 @@ class LooperWorkerContext:
         # Return True if score `x` is better than score `y`
         return x < y;
 
+    def worst_possible_result():
+        # Return the worst possible result that is still
+        # sortable. This is used internally to deal with tests that
+        # fail, and thus should be pessimized as much as possible from
+        # being selected to run again.
+        return float('inf');
+
     def compile(self, flags):
-        cmd = [CC, "-Ofast", "-o", "looper", "main.c", "work.c"] + flags;
-        
+        if sys.platform.startswith('linux'):
+            cmd = [CC, "-Ofast", "-o", "work", "main.c", "work.c"] + flags;
+
+        elif sys.platform == 'win32':
+            cmd = [CC, "main.c", "work.c", "/Fe:work.exe"] + flags;
+
         debug("Worker #{} [{}]: compile(): Executing \"{}\""\
               .format(self.idx, self.workspace, " ".join(cmd)));
 
@@ -500,8 +611,8 @@ class LooperWorkerContext:
         stdout, stderr = res.communicate();
 
         if res.returncode != 0:
-            error("Worker #{} [{}]: compile(): Failed to compile:"\
-                  .format(self.idx, self.workspace));
+            error("Worker #{} [{}]: compile(): Exit code {}: Failed to compile:"\
+                  .format(self.idx, self.workspace, res.returncode));
             print(stderr.decode("utf-8").strip());
             return False;
 
@@ -511,7 +622,10 @@ class LooperWorkerContext:
         return self.size();
 
     def run(self):
-        cmd = ["./looper"];
+        if sys.platform.startswith('linux'):
+            cmd = ["./work"];
+        elif sys.platform == 'win32':
+            cmd = ["work.exe"];
 
         start = time.time();
         res = subprocess.Popen(cmd, cwd=self.workspace,
@@ -529,7 +643,37 @@ class LooperWorkerContext:
         
         return delta;
 
-    def size(self):
+    def dumpbin_find_size_of_section(self):
+        section = ".text";
+
+        cmd = ["dumpbin.exe", "/headers", "work.exe"];
+
+        res = subprocess.Popen(cmd, cwd=self.workspace,
+                               stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE);
+
+        stdout, stderr = res.communicate();
+
+        if res.returncode != 0:
+            error("Worker #{}: Executing \"{}\" failed"\
+                  .format(self.idx, " ".join(cmd)));
+            return None;
+
+        for line in stdout.decode("utf-8").split('\n'):
+            # debug("dumpbin_find_size_of_section(): Scraping \"{}\"".format(line));
+            mo = self.re_text_size.match(line);
+
+            if not mo:
+                continue;
+
+            # debug("Found!");
+            return int(mo.group(1), 16);
+
+        error("Worker #{}: Failed to scrape section size for section \"{}\""\
+              .format(self.idx, section));
+
+    def size_find_size_of_section(self):
         cmd = ["size", "./looper"];
 
         res = subprocess.Popen(cmd, cwd=self.workspace,
@@ -546,11 +690,15 @@ class LooperWorkerContext:
         data = int(fields[1]);
         bss = int(fields[2]);
 
-        return text;
+        return float(text);
+
+    def size(self):
+        if sys.platform.startswith('linux'):
+            return self.size_find_size_of_section();
+        elif sys.platform == 'win32':
+            return self.dumpbin_find_size_of_section();
 
 class SweRVWorkerContext:
-    SOURCE_TAR = "/home/ubuntu/prj/simpletuner/Cores-SweRV.tar.gz";
-
     def __init__(self, idx, workspace):
         self.idx = idx;
         self.workspace = workspace;
@@ -837,7 +985,7 @@ def work():
         info("No C compiler specified, will use whatever is in path");
 
     # The WorkerContext class that we will be using
-    worker_context_classname = "SweRVWorkerContext";
+    worker_context_classname = "ExampleWorkerContext";
     WorkerContext = getattr(sys.modules[__name__], worker_context_classname)
     if WorkerContext is None:
         error("Unknown WorkerContext classname: \"{}\"".\
@@ -845,8 +993,14 @@ def work():
         sys.exit(1);
 
     n_tests = 0;
-    n_core_count = mp.cpu_count();
-    
+
+    if args.processes is not None:
+        n_core_count = args.processes;
+    else:
+        n_core_count = mp.cpu_count();
+
+    info("Running with {} processes".format(n_core_count));
+
     # All flags under consideration
     # flags = ["a", "b", "c", "d"];
     # flags = read_flags_file("/home/maxim/prj/opentuner/ssv2/flags");
@@ -869,7 +1023,7 @@ def work():
     # out what each flag does individually, what impact it has, and if
     # it works at all.
     flags = [];
-    all_gcc_flags = fetch_all_gcc_flags();
+    all_cc_flags = fetch_all_cc_flags();
 
     # If we were provided any target flags, append them now.
     if args.target_flags_file is not None:
@@ -886,9 +1040,9 @@ def work():
     # all_gcc_flags = all_gcc_flags[-20:-1];
 
     with mp.Pool(n_core_count) as pool:
-        all_gcc_flags_test_results = pool.map(check_gcc_flag, all_gcc_flags);
+        all_cc_flags_test_results = pool.map(check_cc_flag, all_cc_flags);
 
-    for flag, returncode in all_gcc_flags_test_results:
+    for flag, returncode in all_cc_flags_test_results:
         if returncode == 0:
             flags.append(flag);
 
@@ -949,6 +1103,11 @@ def work():
     if any([not ok for ok in init_workspaces_ok]):
         error("Atleast one workspace failed to initialize its workspace directory, aborting");
         sys.exit(1);
+
+    # If the user called us with "--setup-workspace-only", we are
+    # done.
+    if args.setup_workspace_only:
+        sys.exit(0);
 
     for idx, worker in enumerate(workers):
         debug("Starting Worker #{}".format(idx));
@@ -1041,6 +1200,9 @@ def work():
         for flag, score in results:
             print("{},{}".format(flag, score), file=flags_top);
 
+            # Also add it to the global leaderboard
+            global_leaderboard.append([flag])
+
     # Submit root flag for testing
     job = create_job_from_flagpath([]);
     info("Putting first job on queue");
@@ -1058,6 +1220,9 @@ def work():
 
     if score is None:
         fatal("root test failed");
+        for worker in workers:
+            worker.terminate();
+
         sys.exit(1);
 
     # Make sure to record the root flag on the global leaderboard (it
