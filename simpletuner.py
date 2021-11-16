@@ -1,6 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import os, sys, re, time, random, subprocess, shutil, string;
 from datetime import datetime;
+import copy;
 
 import multiprocessing as mp;
 import argparse;
@@ -132,26 +133,40 @@ def fatal(*args, **kwargs):
         workspace_file_stderr.flush();
 
 class Flag:
-    def __init__(self, flag, flags):
+    def __init__(self, name, flags):
         self.state = 0;
         self.n_states = len(flags);
         self.exclusions = set();
         self.flags = flags;
 
         # For diagnostic and identification purposes only
-        self.flag = flag;
+        self.name = name;
 
     def __repr__(self):
-        return "<Flag {}: state={}, n_states={}>"\
-            .format(self.flag, self.state, self.n_states);
+        SHOW_FLAGS = False;
+
+        if SHOW_FLAGS:
+            return "<Flag {}: state={}, n_states={} {{{}}}>"\
+                .format(self.name, self.state, self.n_states,
+                        " ".join(self.flags));
+        else:
+            return "<Flag {}: state={}, n_states={}, n_exclusions={}>"\
+                .format(self.name, self.state, self.n_states, len(self.exclusions));
 
     def __str__(self):
         return self.flags[self.state];
 
+    def all_states(self):
+        return list([i for i in range(self.n_states)]);
+
+    def valid_states(self):
+        return list(filter(lambda s: s not in self.exclusions,
+                           [i for i in range(self.n_states)]));
+
     def other_states(self):
         return list(filter(lambda s: s != self.state \
-                           and s not in self.exclusions),
-                    [i for i in range(self.states)]);
+                           and s not in self.exclusions,
+                           [i for i in range(self.n_states)]));
 
 def fetch_gcc_version():
     res = subprocess.Popen([CC, "-v"],
@@ -428,12 +443,21 @@ def fetch_gcc_optimizations():
             # print("Found groups: {}".format(",".join([str(i) for i in range(10)])));
             flag_name = mo.group(1);
 
+            # Remove flags which are hopefully irrelevant to speed
+            # optimisation
+            to_skip = [
+                "live-patching"
+            ];
+
+            if flag_name in to_skip:
+                continue;
+
             # print("line {}: Parsed parameter \"{}\", range [{},{}], default {}"\
             #       .format(lineno, param_name, param_range[0], param_range[1],
             #               param_default));
             flags.append(Flag("-f" + flag_name,
                               ["-f" + flag_name,
-                               "-fno" + flag_name]));
+                               "-fno-" + flag_name]));
 
             # flags.append("-f" + flag_name);
             # flags.append("-fno-" + flag_name);
@@ -447,17 +471,6 @@ def fetch_gcc_optimizations():
         # or
         #     -flifetime-dse=<0,2>                  2
         print("line {}: Unrecognized parameter \"{}\"".format(lineno, line), file=sys.stderr);
-
-    # Remove flags which are hopefully irrelevant to speed
-    # optimisation
-    to_removes = [
-    ];
-
-    for to_remove in to_removes:
-        try:
-            flags.remove(to_remove);
-        except ValueError:
-            continue;
 
     # print("Got stdout:\n", "\n".join(lines));
     return flags;
@@ -517,12 +530,20 @@ def flatten_params(params):
 def fetch_all_gcc_flags():
     flags = [];
     
+    # Everybody knows these
+    flags.append(Flag("-O", ["-O0", "-O1", "-O2", "-O3", "-Ofast", "-Os"]));
+
     # Fetch parameters
     params = fetch_gcc_params();
     flags += flatten_params(params);
 
     # Fetch optimisation flags
     flags += fetch_gcc_optimizations();
+
+    return flags;
+
+def fetch_target_gcc_flags():
+    flags = [];
 
     return flags;
 
@@ -553,22 +574,30 @@ def check_cc_flag(flag):
         return check_msvc_flag(flag);
 
 def check_gcc_flag(flag):
-    cmd = [CC,
-           "-fno-diagnostics-color", # Don't leave control codes in stdout/stderr
-           "-S", # It's not our responsibility to worry about the assembler or linker
-           "-o", "/dev/null", # No output
-           flag,
-           "-x", "c", # Must specify language if taking input from stdin
-           "-" # Take input from stdin
-           ];
+    for state in flag.all_states():
+        info("check_gcc_flag(): Checking {} variant of {} ({}/{})"\
+             .format(flag.flags[state], flag.name, state, flag.n_states - 1));
 
-    res = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE);
+        cmd = [CC,
+               "-fno-diagnostics-color", # Don't leave control codes in stdout/stderr
+               "-S", # It's not our responsibility to worry about the assembler or linker
+               "-o", "/dev/null", # No output
+               flag.flags[state],
+               "-x", "c", # Must specify language if taking input from stdin
+               "-" # Take input from stdin
+               ];
 
-    stdout, stderr = res.communicate();
+        res = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE);
 
-    return (flag, res.returncode);
+        stdout, stderr = res.communicate();
+
+        if res.returncode != 0:
+            warn("Flag {} failed to compile, excluding".format(flag.flags[state]))
+            flag.exclusions = flag.exclusions.union({state});
+
+    return flag;
 
 import tempfile;
 
@@ -1066,31 +1095,37 @@ def worker_func(worker_ctx, work_queue, result_queue):
             debug("Worker #{}: Exiting".format(idx));
             return;
 
-        flagpath = job;
-        flags = " ".join(flagpath)
-        debug("Worker #{}: Got job with flags \"{}\"".format(idx, flags));
+        flags, state_variation = job;
+        flags_str = " ".join(flags)
 
-        compile_ok = worker_ctx.compile(flagpath);
-        if compile_ok:
-            debug("Worker #{}: Succesfully compiled with flags \"{}\"".format(idx, flags));
+        if state_variation is None:
+            debug("Worker #{}: Got job with state variation (<None>), flags \"{}\""\
+                  .format(idx, flags_str));
         else:
-            warn("Worker #{}: Failed to compile with flags \"{}\"".format(idx, flags));
+            debug("Worker #{}: Got job with state variation ({}, {}), flags \"{}\""\
+                  .format(idx, state_variation[0], state_variation[1], flags_str));
+
+        compile_ok = worker_ctx.compile(flags);
+        if compile_ok:
+            debug("Worker #{}: Succesfully compiled with flags \"{}\"".format(idx, flags_str));
+        else:
+            warn("Worker #{}: Failed to compile with flags \"{}\"".format(idx, flags_str));
             # Can't benchmark what we can't build: return.
-            result_queue.put((flagpath, None), block=False);
+            result_queue.put((flags, state_variation, None), block=False);
             continue;
 
         score = worker_ctx.benchmark();
         if score is not None:
             debug("Worker #{}: Succesful benchmark, got score {} with flags \"{}\""\
-                  .format(idx, str(score), flags));
+                  .format(idx, str(score), flags_str));
         else:
-            warn("Worker #{}: Failed to benchmark with flags \"{}\"".format(idx, flags));
+            warn("Worker #{}: Failed to benchmark with flags \"{}\"".format(idx, flags_str));
 
-        result = (flagpath, score);
+        result = (flags, state_variation, score);
         result_queue.put(result, block=False);
 
-def create_job_from_flagpath(flagpath):
-    return flagpath;
+def create_cmd_from_flaglist(flaglist):
+    return [str(flag) for flag in flaglist];
 
 def work():
     global args;
@@ -1157,33 +1192,45 @@ def work():
     for i, flag in enumerate(all_cc_flags):
         print("flag {}: {}".format(i, repr(flag)));
 
-    sys.exit(0);
+    # sys.exit(0);
 
-    # If we were provided any target flags, append them now.
-    if args.target_flags_file is not None:
-        with open(args.target_flags_file) as target_flags_file:
-            for line in target_flags_file:
-                line = line.strip();
+    # Load target flags, if any
+    all_cc_flags += fetch_target_gcc_flags();
 
-                if len(line) == 0:
-                    continue;
-
-                debug("Appending target flag \"{}\"".format(line));
-                flags.append(line);
-
-    # all_gcc_flags = all_gcc_flags[-20:-1];
+    # all_cc_flags = all_cc_flags[-100:-1];
 
     with mp.Pool(n_core_count) as pool:
-        all_cc_flags_test_results = pool.map(check_cc_flag, all_cc_flags);
+        all_cc_flags = pool.map(check_cc_flag, all_cc_flags);
 
-    for flag, returncode in all_cc_flags_test_results:
-        if returncode == 0:
-            flags.append(flag);
+    # for i, flag in enumerate(all_cc_flags):
+    #     print("flag {}: {}".format(i, repr(flag)));
+
+    # Now, all_cc_flags may have excluded flags (because they
+    # miscompiled.) It is not impossible that some flags had every
+    # state excluded, and such flags we should simply remove from
+    # consideration.
+
+    len_all_cc_flags_before = sum([flag.n_states for flag in all_cc_flags]);
+    all_cc_flags = list(filter(lambda cc_flag: cc_flag.n_states > len(cc_flag.exclusions),
+                               all_cc_flags));
+    len_all_cc_flags_after = sum([flag.n_states - len(flag.exclusions) for flag in all_cc_flags]);
+
+    info("flags before excluding broken flags: {} entries.".format(len_all_cc_flags_before));
+    info("flags after excluding broken flags: {} entries.".format(len_all_cc_flags_after));
+
+    # Fixup the flag initial state. We want to pick state 0 as much as
+    # possible, but if that became an exluded state after being tested, then we need to update it.
+    for flag in all_cc_flags:
+        flag.state = flag.valid_states()[0];
+
+    flags = all_cc_flags;
 
     if len(flags) == 0:
         error("After testing \"{}\" flags for function, we're left with 0"
               " working flags! Maybe you're missing the C compiler or something?");
         sys.exit(1);
+
+    # sys.exit(0);
 
     ### Create the worker contexts
 
@@ -1260,224 +1307,165 @@ def work():
     f_live_global_leaderboard = open(
         os.path.join(run_directory, "global_leaderboard.live"), "w");
 
+    # sys.exit(0);
+
+    n_iterations = 0;
+
     ### Enter main loop:
     while True:
-        # We're done
-        if n_active_jobs == 0 \
-           and len(leaderboard) == 0:
-            # We have no more work to do
-            debug("No more work: Exiting...");
-            
-            for idx, worker in enumerate(workers):
-                work_queue.put(None);
-            
-            for idx, worker in enumerate(workers):
-                debug("Trying to exit Worker #{}...".format(idx));
-                worker.join();
-                debug("Exited Worker #{}".format(idx));
+        debug("Running iteration {}".format(n_iterations));
 
-            work_queue.close();
-            result_queue.close()
-            
-            info("All done, tested {} flag combinations."\
-                  .format(n_tests));
+        # First, get the baseline for the current flag configuration
+        work_queue.put((create_cmd_from_flaglist(flags), None), block=False);
+        result = result_queue.get(block=True);
 
-            f_final_global_leaderboard = open(
-                os.path.join(run_directory, "global_leaderboard.final"), "w");
+        _, _, score = result;
 
-            info("Global leaderboard:");
-            for flagpath in global_leaderboard:
-                info("\t{},{}".format(" ".join(flagpath), lookup_flag_from_flagpath(root, flagpath).score));
-                print("{},{}".format(" ".join(flagpath), lookup_flag_from_flagpath(root, flagpath).score),
-                      file=f_final_global_leaderboard);
+        if score is None:
+            fatal("Failed to get baseline for configuration \"{}\"".format("fixme"));
+            sys.exit(1);
 
-                f_final_global_leaderboard.flush();
+        baseline = score;
 
-            f_final_global_leaderboard.close();
-            f_live_global_leaderboard.close();
+        # Instantiate all the jobs we're working on
+        state_variation_and_scores = [];
+        n_jobs = 0;
 
+        for flag_idx, flag in enumerate(flags):
+            for other_state in flag.other_states():
+                state_variation = (flag_idx, other_state)
+                state_variation_and_scores.append((state_variation, None));
+
+                state_variation_flags = copy.deepcopy(flags);
+                state_variation_flags[flag_idx].state = other_state;
+
+                work_queue.put((create_cmd_from_flaglist(state_variation_flags),
+                                state_variation),
+                               block=False);
+                n_jobs += 1;
+
+        # It may be the case that we've reached the end of
+        # state_variations (all have been excluded but one). In which
+        # case we are done.
+        if n_jobs == 0:
+            info("Did not find any state variations to test: We are done.");
             break;
 
-        # We may have to block on the result queue, if:
-        # 1) All execution threads have been given a job, and we need
-        #    to wait for atleast one to return a result before we can
-        #    submit more jobs.
-        # 2) We've submitted all as-of-yet untested children.
-        #    (`leaderboard` will be empty if all the current known
-        #    flags have had all their children submitted for testing.)
-        elif n_active_jobs == n_core_count \
-           or len(leaderboard) == 0:
+        # Wait for the results
+        while n_jobs > 0:
             result = result_queue.get(block=True);
+            n_jobs -= 1;
 
-        # Non-blocking read, for when we're not too fussed about
-        # getting a result right now, because we will (probably) have
-        # work items we can put anyway.
-        else:
-            try:
-                result = result_queue.get_nowait();
-            except queue.Empty:
-                result = None;
+            job_flags, state_variation, score = result;
 
-        if result is not None:
-            n_active_jobs -= 1;
-            n_tests += 1;
+            if score is None:
+                score = float('inf');
 
-            flagpath, score = result;
+            flag_idx, other_state = state_variation;
 
-            # All we are responsible for doing here is updating the
-            # score in the tree, and updating the leaderboard (if the
-            # score is better than the parent.)
-            flag = lookup_flag_from_flagpath(root, flagpath);
-            if score is not None:
-                flag.score = score;
-
-            else:
-                # This indicates that the test failed. So we want to
-                # give it the most pessimistic score possible, being
-                # either -inf or inf - work out which.
-                flag.score = WorkerContext.worst_possible_result();
-
-                # if WorkerContext.better(0.0, float('-inf')):
-                #     flag.score = float('-inf');
-                # else:
-                #     flag.score = float('inf');
-
-            parent_flag = lookup_parent_flag_from_flagpath(root, flagpath);
-            # debug("Got parent_flag \"{}\" for flagpath \"{}\"".format(parent_flag, flagpath));
-
-            # Special case: if `flagpath` is `[]` (i.e. we have
-            # received the result for testing the `root` flag), then
-            # we have no `parent_flag`, and we by-definition put it on
-            # the `leaderboard` (which by-defintion must be empty at
-            # this point.)
-            if parent_flag is None:
-                leaderboard.append([]);
-                # debug("L164: Leaderboard: {}".format(leaderboard));
-
-            else:
-                if WorkerContext.better(flag.score, parent_flag.score):
-                    # FIXME: sorted insert
-                    leaderboard.append(flagpath);
-                    leaderboard.sort(key=lambda path: lookup_flag_from_flagpath(root, path).score);
-                    # debug("Added \"{}\" to leaderboard".format(flagpath));
-                else:
-                    # debug("Child flag \"{}\" ({}) is not better than \"{}\" ({}), skipping"\
-                    #       .format(flagpath, flag.score, flagpath[:-1], parent_flag.score));
-                    pass;
-
-            # Always store the result in the `global_leaderboard`
-            # FIXME: sorted insert
-            if len(global_leaderboard) > 0:
-                prev_best_score = global_leaderboard[0];
-            else:
-                prev_best_score = None;
-
-            global_leaderboard.append(flagpath);
-            global_leaderboard.sort(key=lambda path: lookup_flag_from_flagpath(root, path).score);
-
-            curr_best_score = global_leaderboard[0];
-
-            if curr_best_score != prev_best_score:
-                info("New best flag: \"{}\", score {}"\
-                     .format(" ".join(best_flagpath), best_flag.score));
-
-            # Also write it out to the live leaderboard file, incase
-            # we crash or something.
-            print(" ".join(flagpath) + ","\
-                  + str(lookup_flag_from_flagpath(root, flagpath).score),
+            # Save to file
+            print("{},{}".format(" ".join(job_flags), score),
                   file=f_live_global_leaderboard);
             f_live_global_leaderboard.flush();
 
-        # Pick best from leaderboard
-        # NOTE: If leaderboard is empty, that just means that:
-        #   1). we have exhausted whatever parents we had, AND
-        #   2). all of their children that have been scheduled have either
-        #       resolved and failed to beat the parent, or haven't resolved yet.
-        # if thats the case, then we just need to go back up and blocking-wait.
-        if len(leaderboard) == 0:
-            continue;
-        
-        current_best_flagpath = leaderboard[0];
+            # print("state_variation_and_scores: {}".format(state_variation_and_scores));
+            # print("looking for: {}, {}".format(flag_idx, other_state));
 
-        # If the best flag is now different, switch to exploring it instead.
-        if best_flagpath != current_best_flagpath:
-            best_flagpath = current_best_flagpath;
-            best_flag = lookup_flag_from_flagpath(root, best_flagpath);
-            best_flag_children_iterator = best_flag.create_iterator();
+            idxes = [i for i, e in enumerate(state_variation_and_scores) if e[0][0] == flag_idx and e[0][1] == other_state];
+            # debug("idxes: {}".format(idxes));
 
-        # Get next job
-        have_next_flag_p = False;
-        try:
-            next_child_flag = next(best_flag_children_iterator);
-            have_next_flag_p = True;
-            
-        except StopIteration:
-            # We have exhausted the `best_flag`'s immediate search space
-            # (but not neccesarily its children's children search space).
-            # Remove the flag this flag iterator belongs to from the
-            # leaderboard.
+            state_variation_and_scores[idxes[0]] = (state_variation, score);
 
-            leaderboard.remove(best_flagpath);
-            # debug("Removed \"{}\" from leaderboard as it is exhausted"\
-            #       .format(best_flagpath));
+        # Now sort the list, with best state variation at the top and
+        # worst the worst at the bottom.
+        state_variation_and_scores.sort(key=lambda e: e[1]);
 
-            # debug("Leaderboard now:");
-            for item in leaderboard:
-                print("\t" + str(item));
-            
-            # At this point, go back up and loop again. P.S. if leaderboard is empty now,
-            # then we'll block on the next iteration.
-            continue;
+        # Write out to file for debugging
+        with open(os.path.join(run_directory, "iteration.{}".format(n_iterations)), "w") as file:
+            print("current flags: {}".format(" ".join(job_flags)), file=file);
+            print("baseline: {}".format(baseline), file=file);
 
-        # If we're here, we got a `next_child_flag`.
-        # debug("next_child_flag: {}".format(best_flagpath + [next_child_flag]));
-        
-        # We must have spare compute capacity here, otherwise we would have
-        # blocked at the very beginning.
-        if have_next_flag_p:
-            job = create_job_from_flagpath(best_flagpath + [next_child_flag]);
-            work_queue.put(job);
-            n_active_jobs += 1;
+            print("State variations:", file=file);
 
-        # We're done, go back up.
+            for state_variation, score in state_variation_and_scores:
+                flag_idx, state = state_variation;
+                print("{},{}".format(flags[flag_idx].flags[state], score), file=file);
 
-    return;
+        # Now, we can do something to the baseline set of flags with
+        # this information.
 
-def dump_children(flag):
-    it = flag.create_iterator();
+        # ...If noone beat the baseline, then actually we don't have any more work to do.
+        have_better_than_baseline_p = False;
+        for state_variation, score in state_variation_and_scores:
+            if score < baseline:
+                have_better_than_baseline_p = True;
+                break;
 
-    while True:
-        try:
-            item = next(it);
-            print("Got item: {}".format(item));
-        except StopIteration:
-            print("Got StopIteration");
+        if not have_better_than_baseline_p:
+            info("Iteration {}: No state variable variation managed to beat the current baseline of {}: Exiting."\
+                 .format(n_iterations, baseline));
             break;
 
-def test_flags():
-    # All flags under consideration
-    flags = ["a", "b", "c", "d"];
+        # Exclude some flags from the worst states.
+        MAX_EXCLUSIONS = 1;
+        to_exclude = min(MAX_EXCLUSIONS, len(state_variation_and_scores));
 
-    # Root flag from which we will be searching
-    root = Flag("", flags);
-    it = root.create_iterator();
+        for state_variation, score in state_variation_and_scores[-to_exclude:]:
+            flag_idx, other_state = state_variation;
+            flags[flag_idx].exclusions = flags[flag_idx].exclusions.union({other_state});
 
-    dump_children(root);
+        # Promote some flags to the best states.
+        MAX_PROMOTIONS = 10000000;
+        to_promote = min(MAX_PROMOTIONS, len(state_variation_and_scores));
+        have_promoted = [];
 
-    flag = lookup_flag_from_flagpath(root, ["a"]);
-    dump_children(root);
-    
-    flag = lookup_flag_from_flagpath(root, ["c"]);
-    dump_children(root);
+        for state_variation, score in state_variation_and_scores[0 : to_promote]:
+            flag_idx, other_state = state_variation;
 
-    flag = lookup_flag_from_flagpath(root, ["c", "d"]);
-    dump_children(root);
+            # We don't want to re-promote a flag index that we've
+            # already promoted - that would be a de-motion!
+            if flag_idx in have_promoted:
+                continue;
 
-    parent = lookup_parent_flag_from_flagpath(root, ["c"]);
-    dump_children(parent);
+            have_promoted.append(flag_idx);
 
-    parent = lookup_parent_flag_from_flagpath(root, ["c", "d"]);
-    dump_children(parent);
+            # We don't want to go back to the old state... or do we?
+            current_state = flags[flag_idx].state;
+            flags[flag_idx].exclusions = flags[flag_idx].exclusions.union({current_state});
+            flags[flag_idx].state = other_state;
+
+        # Now that we've adjusted the current flag state, go to the next iteration.
+        n_iterations += 1;
+
+    # If we're here, we broke out of the loop because we have no more
+    # work to do. Close workers, close queues, and exit.
+    for idx, worker in enumerate(workers):
+        work_queue.put(None);
+
+    for idx, worker in enumerate(workers):
+        debug("Trying to exit Worker #{}...".format(idx));
+        worker.join();
+        debug("Exited Worker #{}".format(idx));
+
+    work_queue.close();
+    result_queue.close()
+
+    info("All done, tested {} flag combinations."\
+          .format(n_tests));
+
+    f_final_global_leaderboard = open(
+        os.path.join(run_directory, "global_leaderboard.final"), "w");
+
+    # info("Global leaderboard:");
+    # for flagpath in global_leaderboard:
+    #     info("\t{},{}".format(" ".join(flagpath), lookup_flag_from_flagpath(root, flagpath).score));
+    #     print("{},{}".format(" ".join(flagpath), lookup_flag_from_flagpath(root, flagpath).score),
+    #           file=f_final_global_leaderboard);
+
+    #     f_final_global_leaderboard.flush();
+
+    f_final_global_leaderboard.close();
+    f_live_global_leaderboard.close();
 
 def test_worker_context():
     wc = WorkerContext(0, os.path.join(os.getcwd(), 'workspace', '0'));
