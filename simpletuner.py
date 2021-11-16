@@ -446,7 +446,13 @@ def fetch_gcc_optimizations():
             # Remove flags which are hopefully irrelevant to speed
             # optimisation
             to_skip = [
-                "live-patching"
+                "live-patching",
+                "ipa-profile",
+                "profile-use",
+                "profile-generate",
+                "branch-probabilities",
+                "auto-profile",
+                "fexceptions"
             ];
 
             if flag_name in to_skip:
@@ -531,7 +537,7 @@ def fetch_all_gcc_flags():
     flags = [];
     
     # Everybody knows these
-    flags.append(Flag("-O", ["-O0", "-O1", "-O2", "-O3", "-Ofast", "-Os"]));
+    # flags.append(Flag("-O", ["-O0", "-O1", "-O2", "-O3", "-Ofast", "-Os"]));
 
     # Fetch parameters
     params = fetch_gcc_params();
@@ -544,6 +550,20 @@ def fetch_all_gcc_flags():
 
 def fetch_target_gcc_flags():
     flags = [];
+
+    flags.append(Flag("-mbranch-cost", ["-mbranch-cost={}".format(i) for i in range(64)]));
+    flags.append(Flag("-mcmodel", ["-mcmodel=medlow", "-mcmodel=medany"]));
+    flags.append(Flag("-mrelax", ["-mrelax", "-mno-relax"]));
+    flags.append(Flag("-msave-restore", ["-msave-restore", "-mno-save-restore"]));
+    flags.append(Flag("-mshorten-memrefs", ["-mshorten-memrefs", "-mno-shorten-memrefs"]));
+    flags.append(Flag("-msmall-data-limit", ["-small-data-limit={}".format(i) for i in range(64)]));
+    flags.append(Flag("-mstrict-align", ["-mstrict-align", "-mno-strict-align"]));
+    flags.append(Flag("-mtune",
+         ["-mtune=size",
+          "-mtune=rocket",
+          "-mtune=sifive-3-series",
+          "-mtune=sifive-5-series",
+          "-mtune=sifive-7-series"]));
 
     return flags;
 
@@ -998,7 +1018,8 @@ class SweRVWorkerContext:
                 "target=high_perf", "TEST=cmark_iccm",
                 "TEST_CFLAGS={}".format(" ".join(["-march=" + self.march,
                                                   "-mabi=" + self.mabi,
-                                                  "-Ofast"] + flags)),
+                                                  "-Ofast"] + flags\
+                                                 + ["-fno-exceptions", "-fno-asynchronous-unwind-tables"])),
                 "program.hex"];
 
         debug("Worker #{}: compile(): Executing \"{}\""\
