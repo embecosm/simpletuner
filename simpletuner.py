@@ -44,8 +44,8 @@ parser.add_argument("--setup-workspace-only", action="store_true",
                     " worker thread. Useful for when debugging the"
                     " WorkerContext.init_workspace procedure.");
 
-# CC = "gcc";
-CC = r'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\cl.exe';
+CC = "gcc";
+# CC = r'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\cl.exe';
 
 workspace_file_all = None;
 workspace_file_stdout = None;
@@ -742,7 +742,7 @@ work (void)
 
         # for k, v in self.env.items():
         #     print("{}: {}".format(k, v));
-        print("INCLUDE: {}".format(self.env["INCLUDE"]))
+        # print("INCLUDE: {}".format(self.env["INCLUDE"]))
 
         res = subprocess.Popen(cmd, cwd=self.workspace,
                                env=self.env,
