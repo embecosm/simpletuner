@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 import os, sys, re, time, random, subprocess, shutil, string;
 from datetime import datetime;
 
@@ -130,6 +130,28 @@ def fatal(*args, **kwargs):
     if workspace_file_stderr:
         print("[FATAL] [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_stderr);
         workspace_file_stderr.flush();
+
+class Flag:
+    def __init__(self, flag, flags):
+        self.state = 0;
+        self.n_states = len(flags);
+        self.exclusions = set();
+        self.flags = flags;
+
+        # For diagnostic and identification purposes only
+        self.flag = flag;
+
+    def __repr__(self):
+        return "<Flag {}: state={}, n_states={}>"\
+            .format(self.flag, self.state, self.n_states);
+
+    def __str__(self):
+        return self.flags[self.state];
+
+    def other_states(self):
+        return list(filter(lambda s: s != self.state \
+                           and s not in self.exclusions),
+                    [i for i in range(self.states)]);
 
 def fetch_gcc_version():
     res = subprocess.Popen([CC, "-v"],
@@ -409,8 +431,12 @@ def fetch_gcc_optimizations():
             # print("line {}: Parsed parameter \"{}\", range [{},{}], default {}"\
             #       .format(lineno, param_name, param_range[0], param_range[1],
             #               param_default));
-            flags.append("-f" + flag_name);
-            flags.append("-fno-" + flag_name);
+            flags.append(Flag("-f" + flag_name,
+                              ["-f" + flag_name,
+                               "-fno" + flag_name]));
+
+            # flags.append("-f" + flag_name);
+            # flags.append("-fno-" + flag_name);
 
             continue;
 
@@ -440,6 +466,8 @@ def flatten_params(params):
     flags = [];
 
     for k, v in params.items():
+        flattened = [];
+
         if v["min"] is None:
             # print("Skipping {} as it is unbounded".format(k), file=sys.stderr);
             # continue;
@@ -457,29 +485,32 @@ def flatten_params(params):
         if unbounded_p:
             if v["default"] == 0:
                 for i in range(0, 101, 5):
-                    flags.append("--param={}={}".format(k, i));
+                    flattened.append("--param={}={}".format(k, i));
 
             else:
                 half_range = v["default"];
                 full_range = half_range * 2;
                 for i in range(0, full_range + 1,
                                full_range // 10 if full_range >= 10 else 1):
-                    flags.append("--param={}={}".format(k, i));
+                    flattened.append("--param={}={}".format(k, i));
 
+            flags.append(Flag(k, flattened));
             continue;
 
         if n_options <= 25:
             for i in range(v["min"], v["max"] + 1):
-                flags.append("--param={}={}".format(k, i));
+                flattened.append("--param={}={}".format(k, i));
         else:
             # `... v["max"]` is correct - do the `v["max"] + 1` case
             # explicitly, so we can guarantee to always test it
 
             for i in range(v["min"], v["max"], n_options // 10):
-                flags.append("--param={}={}".format(k, i));
+                flattened.append("--param={}={}".format(k, i));
 
             # Make sure we always test the maximum value
-            flags.append("--param={}={}".format(k, v["max"]));
+            flattened.append("--param={}={}".format(k, v["max"]));
+
+            flags.append(Flag(k, flattened));
 
     return flags;
 
@@ -1024,67 +1055,6 @@ class SweRVWorkerContext:
 
         return text;
 
-class Flag:
-    def __init__(self, flag, flags):
-        self.flags = flags;
-        self.flag = flag;
-        self.score = None;
-        self.children = dict();
-
-    def __str__(self):
-        return "" if self.flag is None else self.flag;
-
-    def create_iterator(self):
-        items = list(filter(lambda flag: (flag not in self.children or \
-                                          self.children[flag].score is None), self.flags));
-
-        if self.flag is None:
-            return iter(items);
-
-        idx = self.flags.index(str(self));
-        return iter(items[idx+1:]);
-
-def lookup_parent_flag_from_flagpath(root, flagpath):
-    assert(isinstance(flagpath, list));
-    
-    if len(flagpath) == 0:
-        return None;
-    
-    elif len(flagpath) < 2:
-        if flagpath[0] not in root.children:
-            walker.children[flagpath[0]] = Flag(flagpath[0], root.flags);
-
-        if len(flagpath) == 1:
-            return root;
-    
-    parent = root;
-    child = parent.children[flagpath[0]];
-
-    for flag in flagpath[1:]:
-        if flag not in child.children:
-            child.children[flag] = Flag(flag, root.flags);
-
-        parent = child;
-        child = child.children[flag];
-
-    return parent;
-
-def lookup_flag_from_flagpath(root, flagpath):
-    assert(isinstance(flagpath, list));
-    
-    if len(flagpath) == 0:
-        return root;
-
-    walker = root;
-
-    for flag in flagpath:
-        if flag not in walker.children:
-            walker.children[flag] = Flag(flag, root.flags);
-
-        walker = walker.children[flag];
-
-    return walker;
-
 def worker_func(worker_ctx, work_queue, result_queue):
     idx = worker_ctx.idx;
     debug("Worker #{}: Started".format(idx));
@@ -1164,10 +1134,6 @@ def work():
 
     info("Running with {} processes".format(n_core_count));
 
-    # All flags under consideration
-    # flags = ["a", "b", "c", "d"];
-    # flags = read_flags_file("/home/maxim/prj/opentuner/ssv2/flags");
-
     # Global leaderboard to record _all_ results
     global_leaderboard = [];
 
@@ -1187,6 +1153,11 @@ def work():
     # it works at all.
     flags = [];
     all_cc_flags = fetch_all_cc_flags();
+
+    for i, flag in enumerate(all_cc_flags):
+        print("flag {}: {}".format(i, repr(flag)));
+
+    sys.exit(0);
 
     # If we were provided any target flags, append them now.
     if args.target_flags_file is not None:
@@ -1214,8 +1185,7 @@ def work():
               " working flags! Maybe you're missing the C compiler or something?");
         sys.exit(1);
 
-    ### Phase 2: Flag performance measurement
-    # We need to create the workers anyway...
+    ### Create the worker contexts
 
     simpletuner_directory = os.path.join(os.getcwd(), 'workspace');
 
@@ -1268,8 +1238,6 @@ def work():
                for worker_ctx in worker_ctxs];
     debug("Done creating {} workers".format(n_core_count));
 
-    # with mp.Pool(n_core_count) as pool:
-    #     init_workspaces_ok = pool.map(WorkerContext.init_workspace, worker_ctxs);
     init_workspaces_ok = [];
     for worker_ctx in worker_ctxs:
         init_workspaces_ok.append(worker_ctx.init_workspace());
@@ -1288,152 +1256,6 @@ def work():
         worker.start();
 
     debug("Started {} workers".format(n_core_count));
-
-    flags_file = args.flag_baselines_file;
-
-    if not flags_file:
-        # Now test individually all the flags that we've discovered.
-        n_active_jobs = 0;
-        results = [];
-
-        for flag in flags:
-            debug("putting {} on work queue...".format(flag));
-            work_queue.put([flag]);
-            n_active_jobs += 1;
-
-        while n_active_jobs > 0:
-            flagpath, score = result_queue.get(block=True);
-            n_active_jobs -= 1;
-            info("{} flag tests left".format(n_active_jobs));
-
-            if score is None:
-                score = WorkerContext.worst_possible_result();
-
-                # if WorkerContext.better(0.0, float('-inf')):
-                #     score = float('-inf');
-                # else:
-                #     score = float('inf');
-
-            results.append((flagpath[0], score));
-
-        # If `better` performance is lower numbers, sort ascending. otherwise,
-        # sort descending. First element should be best performing.
-        results.sort(key=lambda e: e[1], reverse=WorkerContext.better(2, 1));
-
-        flags = [flag for flag, score in results];
-
-        # Root flag from which we will be searching
-        root = Flag(None, flags);
-
-        # Also, create and set the child scores, since we've already
-        # calculated them for the baselines.
-        for flag, score in results:
-            flagpath = [flag];
-
-            child = lookup_flag_from_flagpath(root, flagpath);
-            child.score = score;
-
-    else:
-        results = [];
-
-        debug("Processing flags file \"{}\"..."\
-              .format(flags_file));
-
-        with open(flags_file, "r") as flags_top:
-            for line in flags_top:
-                line = line.strip();
-                debug("Processing line \"{}\"".format(line));
-                flag, score = line.split(',');
-                score = float(score);
-
-                if score == WorkerContext.worst_possible_result():
-                    debug("Found bad result, omitting from results");
-                    continue;
-
-                results.append((flag, score));
-        
-        results.sort(key=lambda e: e[1], reverse=WorkerContext.better(2, 1));
-
-        flags = [flag for flag, score in results];
-
-        # Root flag from which we will be searching
-        root = Flag(None, flags);
-
-        # Also, create and set the child scores, since we've already
-        # calculated them for the baselines.
-        for flag, score in results:
-            flagpath = [flag];
-
-            child = lookup_flag_from_flagpath(root, flagpath);
-            child.score = score;
-
-    # Regardless of whether or not we generated the top flags file
-    # manually, we always write it out to our run directory.
-    flags_file = os.path.join(run_directory, "flags.top");
-    with open(flags_file, "w+") as flags_top:
-        for flag, score in results:
-            print("{},{}".format(flag, score), file=flags_top);
-
-            # Also add it to the global leaderboard
-            global_leaderboard.append([flag])
-
-    # Submit root flag for testing
-    job = create_job_from_flagpath([]);
-    info("Putting first job on queue");
-    info("root flags: {}".format(root.flags));
-    work_queue.put(job, block=False);
-    n_active_jobs = 1;
-    n_tests = 1;
-
-    debug("Put one job on the queue \"{}\"".format(job));
-
-    flagpath, score = result_queue.get(block=True);
-    n_active_jobs -= 1;
-
-    debug("Root: got score \"{}\" (type {})".format(score, type(score)));
-
-    if score is None:
-        fatal("root test failed");
-        for worker in workers:
-            worker.terminate();
-
-        sys.exit(1);
-
-    # Make sure to record the root flag on the global leaderboard (it
-    # may be the case that the root flag is the only flag worth
-    # running, if all the root flag's children have a worse score than
-    # their parent.
-    global_leaderboard.append(flagpath);
-
-    # ...However, we do _not_ put the root flag on the `leaderboard`,
-    # because by definition all of its children will have been
-    # considered, and thus it is no longer eligible for exploitation.
-
-    debug("root.score = {}".format(score));
-    root.score = score;
-
-    # Now that we have a root score, populate the leaderboard if the
-    # score of the given child is `better` than that of the root
-    # score.
-    for child_flag in root.flags:
-        child = root.children[child_flag];
-
-        if WorkerContext.better(child.score, root.score):
-            debug("Leaderboard init: child \"{}\" score {} is better "
-                  "than root score of {}, adding to leaderboard"\
-                  .format(child_flag, child.score, root.score));
-
-            flagpath = [child_flag];
-            leaderboard.append(flagpath)
-        else:
-            debug("Leaderboard init: child \"{}\" score {} is not better "
-                  "than root score of {}, adding to leaderboard"\
-                  .format(child_flag, child.score, root.score));
-
-    leaderboard.sort(key=lambda flagpath: lookup_flag_from_flagpath(root, flagpath).score);
-    debug("Leaderboard now:");
-    for flagpath in leaderboard:
-        print(" ".join(flagpath));
 
     f_live_global_leaderboard = open(
         os.path.join(run_directory, "global_leaderboard.live"), "w");
