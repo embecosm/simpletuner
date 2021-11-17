@@ -45,7 +45,7 @@ parser.add_argument("--setup-workspace-only", action="store_true",
                     " worker thread. Useful for when debugging the"
                     " WorkerContext.init_workspace procedure.");
 
-CC = "gcc";
+CC = "riscv32-unknown-elf-gcc";
 # CC = r'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\cl.exe';
 
 workspace_file_all = None;
@@ -556,7 +556,7 @@ def fetch_target_gcc_flags():
     flags.append(Flag("-mrelax", ["-mrelax", "-mno-relax"]));
     flags.append(Flag("-msave-restore", ["-msave-restore", "-mno-save-restore"]));
     flags.append(Flag("-mshorten-memrefs", ["-mshorten-memrefs", "-mno-shorten-memrefs"]));
-    flags.append(Flag("-msmall-data-limit", ["-small-data-limit={}".format(i) for i in range(64)]));
+    flags.append(Flag("-msmall-data-limit", ["-msmall-data-limit={}".format(i) for i in range(64)]));
     flags.append(Flag("-mstrict-align", ["-mstrict-align", "-mno-strict-align"]));
     flags.append(Flag("-mtune",
          ["-mtune=size",
