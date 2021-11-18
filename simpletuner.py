@@ -30,7 +30,7 @@ parser.add_argument("--flag-baselines-file", default=None,
                     help="Specify file that contains a comma-separated"
                     "file containing lines of <score,flag> tuples.");
 
-parser.add_argument("--cc-for-discovery", default=None,
+parser.add_argument("--cc", default="cc",
                     help="PLEASE make sure that this compiler"
                     " is the same that you WorkerContext will be using!");
 
@@ -45,7 +45,9 @@ parser.add_argument("--setup-workspace-only", action="store_true",
                     " worker thread. Useful for when debugging the"
                     " WorkerContext.init_workspace procedure.");
 
-CC = "riscv32-unknown-elf-gcc";
+args = parser.parse_args();
+
+# CC = "riscv32-unknown-elf-gcc";
 # CC = r'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910\bin\Hostx64\x64\cl.exe';
 
 workspace_file_all = None;
@@ -143,11 +145,11 @@ class Flag:
         self.name = name;
 
     def __repr__(self):
-        SHOW_FLAGS = False;
+        SHOW_FLAGS = True;
 
         if SHOW_FLAGS:
-            return "<Flag {}: state={}, n_states={} {{{}}}>"\
-                .format(self.name, self.state, self.n_states,
+            return "<Flag {}: state={}, n_states={}, n_exclusions={}, {{{}}}>"\
+                .format(self.name, self.state, self.n_states, len(self.exclusions),
                         " ".join(self.flags));
         else:
             return "<Flag {}: state={}, n_states={}, n_exclusions={}>"\
@@ -169,7 +171,7 @@ class Flag:
                            [i for i in range(self.n_states)]));
 
 def fetch_gcc_version():
-    res = subprocess.Popen([CC, "-v"],
+    res = subprocess.Popen([args.cc, "-v"],
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE);
 
@@ -200,7 +202,7 @@ def fetch_gcc_version():
     return gcc_version;
 
 def fetch_gcc_target():
-    res = subprocess.Popen([CC, "-v"],
+    res = subprocess.Popen([args.cc, "-v"],
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE);
 
@@ -255,7 +257,7 @@ def fetch_gcc_params():
         re_param_bounded = re.compile(
             r"([a-zA-Z0-9\-]+)\s+default (\-?[0-9]+) minimum (\-?[0-9]+) maximum (\-?[0-9]+)");
 
-    res = subprocess.Popen([CC, "--help=params", "-Q"],
+    res = subprocess.Popen([args.cc, "-Ofast", "--help=params", "-Q"],
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE);
 
@@ -411,9 +413,9 @@ def fetch_gcc_params():
 def fetch_gcc_optimizations():
     flags = [];
 
-    re_param_simple = re.compile(r"\-f([a-zA-Z0-9\-]+)\s+");
+    re_param_simple = re.compile(r"\-f([a-zA-Z0-9\-]+)\s+(\[disabled\]|\[enabled\])?");
 
-    res = subprocess.Popen([CC, "--help=optimizers", "-Q"],
+    res = subprocess.Popen([args.cc, "-Ofast", "--help=optimizers", "-Q"],
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE);
 
@@ -439,7 +441,7 @@ def fetch_gcc_optimizations():
         #     -ftree-partial-pre                    [disabled]
         mo = re_param_simple.search(line);
         if mo:
-            # print("Found groups: {}".format(",".join([mo.group(i) for i in range(len(mo.groups()))])));
+            print("Found groups: {}".format(",".join([mo.group(i) for i in range(len(mo.groups()))])));
             # print("Found groups: {}".format(",".join([str(i) for i in range(10)])));
             flag_name = mo.group(1);
 
@@ -461,9 +463,16 @@ def fetch_gcc_optimizations():
             # print("line {}: Parsed parameter \"{}\", range [{},{}], default {}"\
             #       .format(lineno, param_name, param_range[0], param_range[1],
             #               param_default));
-            flags.append(Flag("-f" + flag_name,
-                              ["-f" + flag_name,
-                               "-fno-" + flag_name]));
+
+            if mo.group(2) is not None:
+                if mo.group(2) == "[enabled]":
+                    flags.append(Flag("-f" + flag_name,
+                                      ["-f" + flag_name,
+                                       "-fno-" + flag_name]));
+                else:
+                    flags.append(Flag("-f" + flag_name,
+                                      ["-fno-" + flag_name,
+                                       "-f" + flag_name]));
 
             # flags.append("-f" + flag_name);
             # flags.append("-fno-" + flag_name);
@@ -490,7 +499,13 @@ def flatten_params(params):
         if v["min"] is None:
             # print("Skipping {} as it is unbounded".format(k), file=sys.stderr);
             # continue;
-            pass;
+            flattened.append("--param={}={}".format(k, v["default"]));
+
+            for i in range(0, 21):
+                flattened.append("--param={}={}".format(k, i));
+                
+            for i in range(30, 101, 10):
+                flattened.append("--param={}={}".format(k, i));
 
         else:
             print("Expanding {}: (default: --param={}={})"\
@@ -503,27 +518,46 @@ def flatten_params(params):
 
         if unbounded_p:
             if v["default"] == 0:
+                flattened.append("--param={}={}".format(k, v["default"]));
+
                 for i in range(0, 101, 5):
+                    if i == v["default"]:
+                        continue;
+
                     flattened.append("--param={}={}".format(k, i));
 
             else:
                 half_range = v["default"];
+                flattened.append("--param={}={}".format(k, half_range));
+                
                 full_range = half_range * 2;
                 for i in range(0, full_range + 1,
                                full_range // 10 if full_range >= 10 else 1):
+                    if i == v["default"]:
+                        continue;
+                    
                     flattened.append("--param={}={}".format(k, i));
 
             flags.append(Flag(k, flattened));
             continue;
 
         if n_options <= 25:
+            flattened.append("--param={}={}".format(k, v["default"]));
+
             for i in range(v["min"], v["max"] + 1):
+                if i == v["default"]:
+                    continue;
+
                 flattened.append("--param={}={}".format(k, i));
         else:
             # `... v["max"]` is correct - do the `v["max"] + 1` case
             # explicitly, so we can guarantee to always test it
+            flattened.append("--param={}={}".format(k, v["default"]));
 
             for i in range(v["min"], v["max"], n_options // 10):
+                if i == v["default"]:
+                    continue;
+
                 flattened.append("--param={}={}".format(k, i));
 
             # Make sure we always test the maximum value
@@ -539,24 +573,24 @@ def fetch_all_gcc_flags():
     # Everybody knows these
     # flags.append(Flag("-O", ["-O0", "-O1", "-O2", "-O3", "-Ofast", "-Os"]));
 
+    # Fetch optimisation flags
+    flags += fetch_gcc_optimizations();
+
     # Fetch parameters
     params = fetch_gcc_params();
     flags += flatten_params(params);
-
-    # Fetch optimisation flags
-    flags += fetch_gcc_optimizations();
 
     return flags;
 
 def fetch_target_gcc_flags():
     flags = [];
 
-    flags.append(Flag("-mbranch-cost", ["-mbranch-cost={}".format(i) for i in range(64)]));
+    flags.append(Flag("-mbranch-cost", ["-mbranch-cost={}".format(i) for i in range(20)]));
     flags.append(Flag("-mcmodel", ["-mcmodel=medlow", "-mcmodel=medany"]));
     flags.append(Flag("-mrelax", ["-mrelax", "-mno-relax"]));
     flags.append(Flag("-msave-restore", ["-msave-restore", "-mno-save-restore"]));
     flags.append(Flag("-mshorten-memrefs", ["-mshorten-memrefs", "-mno-shorten-memrefs"]));
-    flags.append(Flag("-msmall-data-limit", ["-msmall-data-limit={}".format(i) for i in range(64)]));
+    flags.append(Flag("-msmall-data-limit", ["-msmall-data-limit={}".format(i) for i in range(20)]));
     flags.append(Flag("-mstrict-align", ["-mstrict-align", "-mno-strict-align"]));
     flags.append(Flag("-mtune",
          ["-mtune=size",
@@ -598,7 +632,7 @@ def check_gcc_flag(flag):
         info("check_gcc_flag(): Checking {} variant of {} ({}/{})"\
              .format(flag.flags[state], flag.name, state, flag.n_states - 1));
 
-        cmd = [CC,
+        cmd = [args.cc,
                "-fno-diagnostics-color", # Don't leave control codes in stdout/stderr
                "-S", # It's not our responsibility to worry about the assembler or linker
                "-o", "/dev/null", # No output
@@ -688,7 +722,7 @@ def check_msvc_flag(flag):
     with open(test_filename, "w") as file:
         file.write(test_c);
 
-    cmd = [CC,
+    cmd = [args.cc,
            "/c", # Compile only, no link
            flag,
            test_filename];
@@ -727,6 +761,35 @@ def check_msvc_flag(flag):
 #         flags.append(flag);
 
 #     return flags;
+
+# From here: https://stackoverflow.com/a/3431835
+import hashlib
+
+def hash_bytestr_iter(bytesiter, hasher, ashexstr=True):
+    for block in bytesiter:
+        hasher.update(block)
+    return hasher.hexdigest() if ashexstr else hasher.digest()
+
+def file_as_blockiter(afile, blocksize=65536):
+    with afile:
+        block = afile.read(blocksize)
+        while len(block) > 0:
+            yield block
+            block = afile.read(blocksize)
+
+def get_checksum_for_filename(filename):
+    return hash_bytestr_iter(file_as_blockiter(open(filename, 'rb')), hashlib.sha256());
+
+class CompileRequest:
+    def __init__(self):
+        pass;
+
+import random;
+
+class CompileResult:
+    def __init__(self, ok, checksum):
+        self.ok = ok;
+        self.checksum = checksum;
 
 class ExampleWorkerContext:
     MAIN_C = \
@@ -772,6 +835,8 @@ work (void)
         if sys.platform == 'win32':
             self.re_text_size = re.compile(r"\s*([0-9a-fA-F]+)\svirtual size");
 
+        random.seed(self.idx);
+
     def init_workspace(self):
         debug("Worker #{}: Creating workspace in {}"\
               .format(self.idx, self.workspace));
@@ -807,15 +872,15 @@ work (void)
         fstderr = open(os.path.join(self.workspace, "stderr.log"), "ab");
 
         if sys.platform.startswith('linux'):
-            cmd = [CC, "-Ofast", "-o", "work", "main.c", "work.c"] + flags;
+            cmd = [args.cc, "-Ofast", "-o", "work", "main.c", "work.c"] + flags;
 
         elif sys.platform == 'win32':
-            cmd = [CC, "main.c", "work.c", "/Fe:work.exe"] + flags;
+            cmd = [args.cc, "main.c", "work.c", "/Fe:work.exe"] + flags;
 
         else:
             error("Invalid platform for compile(): \"{}\""\
                   .format(sys.platform));
-            return None;
+            return CompileResult(False, None);
 
         debug("Worker #{} [{}]: compile(): Executing \"{}\""\
               .format(self.idx, self.workspace, " ".join(cmd)));
@@ -843,12 +908,15 @@ work (void)
                   .format(self.idx, self.workspace, res.returncode));
             print(stderr.decode("utf-8").strip());
             print(stdout.decode("utf-8").strip());
-            return False;
+            return CompileResult(False, None);
 
-        return True;
+        # Get the checksum
+        checksum = get_checksum_for_filename(os.path.join(self.workspace, "work"));
+
+        return CompileResult(True, checksum);
 
     def benchmark(self):
-        return self.size();
+        return self.run();
 
     def run(self):
         if sys.platform.startswith('linux'):
@@ -860,19 +928,29 @@ work (void)
               .format(self.idx, self.workspace, " ".join(cmd)));
 
         start = time.time();
+
+        timeout_sec = 30;
+        did_timeout_p = False;
+
         res = subprocess.Popen(cmd, cwd=self.workspace,
                                stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE);
 
-        stdout, stderr = res.communicate();
+        try:
+            stdout, stderr = res.communicate(timeout=timeout_sec);
+        except subprocess.TimeoutExpired:
+            did_timeout_p = True;
 
-        end = time.time();
-        delta = end - start;
+        if did_timeout_p:
+            return None;
 
         if res.returncode != 0:
             return None;
         
+        end = time.time();
+        delta = end - start;
+
         return delta;
 
     def dumpbin_find_size_of_section(self):
@@ -1010,7 +1088,7 @@ class SweRVWorkerContext:
             error("Worker #{}: compile(): Failed to clean directory:"\
                   .format(self.idx));
             error(stderr.decode("utf-8").strip());
-            return False;
+            return CompileResult(False, None);
 
         make = ["make", "-f", "tools/Makefile",
                 "RV_ROOT={}".format(self.workspace),
@@ -1036,9 +1114,12 @@ class SweRVWorkerContext:
             error("Worker #{} [{}]: compile(): Failed to compile:"\
                   .format(self.idx, self.workspace));
             error(stderr.decode("utf-8").strip());
-            return False;
+            return CompileResult(False, None);
 
-        return True;
+        # Get the checksum
+        checksum = get_checksum_for_filename(os.path.join(self.workspace, "cmark_iccm.exe"));
+
+        return CompileResult(True, checksum);
 
     def benchmark(self):
         return self.run();
@@ -1105,7 +1186,7 @@ class SweRVWorkerContext:
 
         return text;
 
-def worker_func(worker_ctx, work_queue, result_queue):
+def worker_func(worker_ctx, work_queue, result_queue, binary_checksum_result_cache):
     idx = worker_ctx.idx;
     debug("Worker #{}: Started".format(idx));
     
@@ -1126,19 +1207,32 @@ def worker_func(worker_ctx, work_queue, result_queue):
             debug("Worker #{}: Got job with state variation ({}, {}), flags \"{}\""\
                   .format(idx, state_variation[0], state_variation[1], flags_str));
 
-        compile_ok = worker_ctx.compile(flags);
-        if compile_ok:
+        compile_result = worker_ctx.compile(flags);
+        if compile_result.ok:
             debug("Worker #{}: Succesfully compiled with flags \"{}\"".format(idx, flags_str));
+            checksum = compile_result.checksum;
+
         else:
             warn("Worker #{}: Failed to compile with flags \"{}\"".format(idx, flags_str));
             # Can't benchmark what we can't build: return.
             result_queue.put((flags, state_variation, None), block=False);
             continue;
 
+        if checksum in binary_checksum_result_cache:
+            score = binary_checksum_result_cache[checksum];
+            debug("Worker #{}: Hit cache result \"{}\"! Re-using result {}"\
+                  .format(idx, checksum, score));
+
+            result = (flags, state_variation, score);
+            result_queue.put(result, block=False);
+            continue;
+
         score = worker_ctx.benchmark();
         if score is not None:
             debug("Worker #{}: Succesful benchmark, got score {} with flags \"{}\""\
                   .format(idx, str(score), flags_str));
+            binary_checksum_result_cache[checksum] = score;
+
         else:
             warn("Worker #{}: Failed to benchmark with flags \"{}\"".format(idx, flags_str));
 
@@ -1150,9 +1244,6 @@ def create_cmd_from_flaglist(flaglist):
 
 def work():
     global args;
-    global CC;
-
-    args = parser.parse_args();
 
     if args.flag_baselines_file is not None:
         info("Will be using \"{}\" for flag baselines"\
@@ -1160,10 +1251,9 @@ def work():
     else:
         info("No flag baselines file specified, will automatically generate flag baselines");
 
-    if args.cc_for_discovery is not None:
+    if args.cc is not None:
         info("Will be using \"{}\" for flag baselines"\
-             .format(args.cc_for_discovery));
-        CC = args.cc_for_discovery;
+             .format(args.cc));
     else:
         info("No C compiler specified, will use whatever is in path");
 
@@ -1218,7 +1308,8 @@ def work():
     # Load target flags, if any
     all_cc_flags += fetch_target_gcc_flags();
 
-    # all_cc_flags = all_cc_flags[-100:-1];
+    # Trim flags (useful for debug)
+    # all_cc_flags = all_cc_flags[-20:-1];
 
     with mp.Pool(n_core_count) as pool:
         all_cc_flags = pool.map(check_cc_flag, all_cc_flags);
@@ -1293,6 +1384,7 @@ def work():
     global workspace_file_stderr;
     workspace_file_stderr = open(os.path.join(run_directory, "stderr.log"), "w");
 
+    # Create worker directories, and then the workers themselves.
     worker_ctxs = [];
     for idx in range(n_core_count):
         worker_workspace = os.path.join(run_directory, str(idx));
@@ -1300,9 +1392,15 @@ def work():
         os.mkdir(worker_workspace);
         worker_ctxs.append(WorkerContext(idx, worker_workspace));
 
+    # Create shared dictionary mapping checksums to run times. This
+    # avoids having to run binaries for which the result didn't
+    # change.
+    manager = mp.Manager();
+    binary_checksum_result_cache = manager.dict();
+
     debug("Creating {} workers".format(n_core_count));
     workers = [mp.Process(target=worker_func,
-                          args=(worker_ctx, work_queue, result_queue))
+                          args=(worker_ctx, work_queue, result_queue, binary_checksum_result_cache))
                for worker_ctx in worker_ctxs];
     debug("Done creating {} workers".format(n_core_count));
 
@@ -1436,7 +1534,7 @@ def work():
             flags[flag_idx].exclusions = flags[flag_idx].exclusions.union({other_state});
 
         # Promote some flags to the best states.
-        MAX_PROMOTIONS = 10000000;
+        MAX_PROMOTIONS = 3;
         to_promote = min(MAX_PROMOTIONS, len(state_variation_and_scores));
         have_promoted = [];
 
