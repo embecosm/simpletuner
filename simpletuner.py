@@ -1534,7 +1534,7 @@ def work():
             flags[flag_idx].exclusions = flags[flag_idx].exclusions.union({other_state});
 
         # Promote some flags to the best states.
-        MAX_PROMOTIONS = 3;
+        MAX_PROMOTIONS = 1;
         to_promote = min(MAX_PROMOTIONS, len(state_variation_and_scores));
         have_promoted = [];
 
