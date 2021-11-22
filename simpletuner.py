@@ -34,12 +34,6 @@ parser.add_argument("--cc", default="cc",
                     help="PLEASE make sure that this compiler"
                     " is the same that you WorkerContext will be using!");
 
-parser.add_argument("--target-flags-file", default=None,
-                    help="Additional flags file that will be appended"
-                    " to generic flags  provided by the compiler."
-                    " Typically you would put target-specific stuff here"
-                    ", e.g. -mtune, -mcpu, etc.");
-
 parser.add_argument("--setup-workspace-only", action="store_true",
                     help="Exit after setting up a workspace for each"
                     " worker thread. Useful for when debugging the"
