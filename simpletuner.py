@@ -1438,6 +1438,7 @@ def work():
             fatal("Failed to get baseline for configuration \"{}\"".format("fixme"));
             sys.exit(1);
 
+        baseline_flags = flags;
         baseline = score;
 
         # Instantiate all the jobs we're working on
@@ -1495,7 +1496,7 @@ def work():
 
         # Write out to file for debugging
         with open(os.path.join(run_directory, "iteration.{}".format(n_iterations)), "w") as file:
-            print("current flags: {}".format(" ".join(job_flags)), file=file);
+            print("current flags: {}".format(" ".join(baseline_flags)), file=file);
             print("baseline: {}".format(baseline), file=file);
 
             print("State variations:", file=file);
