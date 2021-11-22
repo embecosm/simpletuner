@@ -77,6 +77,7 @@ def info(*args, **kwargs):
         workspace_file_all.flush();
 
     if workspace_file_stdout:
+        print("[info attempt]");
         print("[info]  [" + now + "] " + " ".join(map(str,args)), **kwargs, file=workspace_file_stdout);
         workspace_file_stdout.flush();
 
@@ -194,6 +195,18 @@ def fetch_gcc_version():
 
     # debug("Got gcc version: {}".format(gcc_version));
     return gcc_version;
+
+def fetch_gcc_v():
+    res = subprocess.Popen([args.cc, "-v"],
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE);
+
+    stdout, stderr = res.communicate();
+
+    if res.returncode != 0:
+        return None;
+
+    return stderr.decode("utf-8").strip();
 
 def fetch_gcc_target():
     res = subprocess.Popen([args.cc, "-v"],
@@ -592,12 +605,16 @@ def fetch_target_gcc_flags():
     flags.append(Flag("-mshorten-memrefs", ["-mshorten-memrefs", "-mno-shorten-memrefs"]));
     flags.append(Flag("-msmall-data-limit", ["-msmall-data-limit={}".format(i) for i in range(20)]));
     flags.append(Flag("-mstrict-align", ["-mstrict-align", "-mno-strict-align"]));
+
+    # flags.append(Flag("-mtune",
+    #      ["-mtune=size",
+    #       "-mtune=rocket",
+    #       "-mtune=sifive-3-series",
+    #       "-mtune=sifive-5-series",
+    #       "-mtune=sifive-7-series"]));
+
     flags.append(Flag("-mtune",
-         ["-mtune=size",
-          "-mtune=rocket",
-          "-mtune=sifive-3-series",
-          "-mtune=sifive-5-series",
-          "-mtune=sifive-7-series"]));
+         ["-mtune=sifive-7-series"]));
 
     return flags;
 
@@ -1157,7 +1174,8 @@ class SweRVWorkerContext:
             score = int(mo.group(1));
         
         if score is None:
-            warn("Failed to run");
+            warn("Worker #{}: [{}]: run(): Failed to find score: Either the benchmark failed to execute correctly, or the verilator model cycle timeout threshold was reached.".format(self.idx, self.workspace));
+
         else:
             debug("Worker #{}: [{}]: run(): Got score \"{}\""\
                   .format(self.idx, self.workspace, str(score)));
@@ -1379,10 +1397,18 @@ def work():
     # Create log files
     global workspace_file_all;
     workspace_file_all = open(os.path.join(run_directory, "all.log"), "w");
+
     global workspace_file_stdout;
     workspace_file_stdout = open(os.path.join(run_directory, "stdout.log"), "w");
+    print("workspace_file_stdout: {}".format(workspace_file_stdout));
+
     global workspace_file_stderr;
     workspace_file_stderr = open(os.path.join(run_directory, "stderr.log"), "w");
+    print("workspace_file_stderr: {}".format(workspace_file_stderr));
+
+    # Log which version of GCC we're using
+    info("gcc -v output:");
+    info(fetch_gcc_v());
 
     # Create worker directories, and then the workers themselves.
     worker_ctxs = [];
@@ -1445,7 +1471,7 @@ def work():
         _, _, score = result;
 
         if score is None:
-            fatal("Failed to get baseline for configuration \"{}\"".format("fixme"));
+            fatal("Failed to get baseline: This is unrecoverable. It may be the case that there's one or two flags causing the failure.");
             sys.exit(1);
 
         baseline_flags = flags;
@@ -1506,7 +1532,7 @@ def work():
 
         # Write out to file for debugging
         with open(os.path.join(run_directory, "iteration.{}".format(n_iterations)), "w") as file:
-            print("current flags: {}".format(" ".join(baseline_flags)), file=file);
+            print("current flags: {}".format(" ".join(create_cmd_from_flaglist(baseline_flags))), file=file);
             print("baseline: {}".format(baseline), file=file);
 
             print("State variations:", file=file);
@@ -1519,16 +1545,17 @@ def work():
         # this information.
 
         # ...If noone beat the baseline, then actually we don't have any more work to do.
-        have_better_than_baseline_p = False;
-        for state_variation, score in state_variation_and_scores:
-            if score < baseline:
-                have_better_than_baseline_p = True;
-                break;
 
-        if not have_better_than_baseline_p:
-            info("Iteration {}: No state variable variation managed to beat the current baseline of {}: Exiting."\
-                 .format(n_iterations, baseline));
-            break;
+        # have_better_than_baseline_p = False;
+        # for state_variation, score in state_variation_and_scores:
+        #     if score < baseline:
+        #         have_better_than_baseline_p = True;
+        #         break;
+
+        # if not have_better_than_baseline_p:
+        #     info("Iteration {}: No state variable variation managed to beat the current baseline of {}: Exiting."\
+        #          .format(n_iterations, baseline));
+        #     break;
 
         # Exclude some flags from the worst states.
         MAX_EXCLUSIONS = 1;
@@ -1539,7 +1566,7 @@ def work():
             flags[flag_idx].exclusions = flags[flag_idx].exclusions.union({other_state});
 
         # Promote some flags to the best states.
-        MAX_PROMOTIONS = 1;
+        MAX_PROMOTIONS = 3;
         to_promote = min(MAX_PROMOTIONS, len(state_variation_and_scores));
         have_promoted = [];
 
@@ -1550,6 +1577,10 @@ def work():
             # already promoted - that would be a de-motion!
             if flag_idx in have_promoted:
                 continue;
+
+            # If we have less better scores than to_promote, exit early.
+            if baseline <= score:
+                break;
 
             have_promoted.append(flag_idx);
 
