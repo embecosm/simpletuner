@@ -448,7 +448,13 @@ def fetch_gcc_optimizations():
                 "profile-generate",
                 "branch-probabilities",
                 "auto-profile",
-                "fexceptions"
+                "fexceptions",
+
+                # This generates annoying '-.opt-record.json.gz' in
+                # the working directory of the python script, which
+                # then has to be deleted via $ rm --
+                # '-.opt-record.json.gz'.
+                "fsave-optimization-record"
             ];
 
             if flag_name in to_skip:
