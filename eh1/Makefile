@@ -8,7 +8,8 @@ Cores-SweRV/:
 	git clone https://github.com/chipsalliance/Cores-SweRV \
 	&& cd Cores-SweRV \
 	&& git checkout v1.9 \
-	&& git apply ../0001-Fix-makefile.patch
+	&& git apply ../0001-Fix-makefile.patch \
+	&& git apply ../0002-move-eh-frame-to-extdata.patch
 
 Cores-SweRV/obj_dir/Vtb_top: Cores-SweRV/
 	cd Cores-SweRV/ \

@@ -1,0 +1,18 @@
+ testbench/asm/cmark_iccm.ld | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/testbench/asm/cmark_iccm.ld b/testbench/asm/cmark_iccm.ld
+index 6e3161a..42bbcbf 100644
+--- a/testbench/asm/cmark_iccm.ld
++++ b/testbench/asm/cmark_iccm.ld
+@@ -12,6 +12,7 @@ MEMORY {
+ SECTIONS {
+   .text.init : {*(.text.init)} > EXTCODE
+   init_end = .;
++  .eh_frame : {*(.eh_frame)} > EXTDATA
+   .data.io  : { *(.data.io) } > IO
+   .text : { *(.text) *(.text.startup)} > ICCM
+    text_end = .;
+-- 
+2.25.1
+
