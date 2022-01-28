@@ -1398,11 +1398,13 @@ def work():
     manager = mp.Manager();
     binary_checksum_result_cache = manager.dict();
 
-    debug("Creating {} workers".format(n_core_count));
+    debug("Creating {} worker processes".format(n_core_count));
     workers = [mp.Process(target=worker_func,
                           args=(worker_ctx, work_queue, result_queue, binary_checksum_result_cache))
                for worker_ctx in worker_ctxs];
-    debug("Done creating {} workers".format(n_core_count));
+    debug("Done creating {} worker processes".format(n_core_count));
+
+    debug("Initializing {} worker contexts".format(n_core_count));
 
     init_workspaces_ok = [];
     for worker_ctx in worker_ctxs:
@@ -1411,6 +1413,8 @@ def work():
     if any([not ok for ok in init_workspaces_ok]):
         error("Atleast one workspace failed to initialize its workspace directory, aborting");
         sys.exit(1);
+
+    debug("Done initializing {} worker contexts".format(n_core_count));
 
     # If the user called us with "--setup-workspace-only", we are
     # done.
