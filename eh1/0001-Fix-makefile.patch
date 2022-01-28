@@ -1,0 +1,16 @@
+diff --git a/tools/Makefile b/tools/Makefile
+index ef3db6b..2dc332b 100755
+--- a/tools/Makefile
++++ b/tools/Makefile
+@@ -102,7 +102,7 @@ verilator-build: ${TBFILES} ${BUILD_DIR}/defines.h test_tb_top.cpp
+                 ${TBFILES} \
+                 --top-module tb_top -exe test_tb_top.cpp --autoflush $(VERILATOR_DEBUG)
+ 	cp ${RV_ROOT}/testbench/test_tb_top.cpp obj_dir
+-	$(MAKE) -j -C obj_dir/ -f Vtb_top.mk $(VERILATOR_MAKE_FLAGS)
++	$(MAKE) -j $(shell nproc) -C obj_dir/ -f Vtb_top.mk $(VERILATOR_MAKE_FLAGS)
+ 	touch verilator-build
+ 
+ vcs-build: ${TBFILES} ${BUILD_DIR}/defines.h
+-- 
+2.25.1
+
