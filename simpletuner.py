@@ -606,15 +606,15 @@ def fetch_target_gcc_flags():
     flags.append(Flag("-msmall-data-limit", ["-msmall-data-limit={}".format(i) for i in range(20)]));
     flags.append(Flag("-mstrict-align", ["-mstrict-align", "-mno-strict-align"]));
 
-    # flags.append(Flag("-mtune",
-    #      ["-mtune=size",
-    #       "-mtune=rocket",
-    #       "-mtune=sifive-3-series",
-    #       "-mtune=sifive-5-series",
-    #       "-mtune=sifive-7-series"]));
-
     flags.append(Flag("-mtune",
-         ["-mtune=sifive-7-series"]));
+         ["-mtune=size",
+          "-mtune=rocket",
+          "-mtune=sifive-3-series",
+          "-mtune=sifive-5-series",
+          "-mtune=sifive-7-series"]));
+
+    # flags.append(Flag("-mtune",
+    #      ["-mtune=sifive-7-series"]));
 
     return flags;
 
@@ -933,7 +933,8 @@ work (void)
         return CompileResult(True, checksum);
 
     def benchmark(self):
-        return self.run();
+        # return self.run();
+        return self.size();
 
     def run(self):
         if sys.platform.startswith('linux'):
@@ -1327,7 +1328,7 @@ def work():
     all_cc_flags += fetch_target_gcc_flags();
 
     # Trim flags (useful for debug)
-    # all_cc_flags = all_cc_flags[-20:-1];
+    all_cc_flags = all_cc_flags[-20:-1];
 
     with mp.Pool(n_core_count) as pool:
         all_cc_flags = pool.map(check_cc_flag, all_cc_flags);
@@ -1558,7 +1559,7 @@ def work():
         #     break;
 
         # Exclude some flags from the worst states.
-        MAX_EXCLUSIONS = 1;
+        MAX_EXCLUSIONS = 3;
         to_exclude = min(MAX_EXCLUSIONS, len(state_variation_and_scores));
 
         for state_variation, score in state_variation_and_scores[-to_exclude:]:
@@ -1566,7 +1567,7 @@ def work():
             flags[flag_idx].exclusions = flags[flag_idx].exclusions.union({other_state});
 
         # Promote some flags to the best states.
-        MAX_PROMOTIONS = 3;
+        MAX_PROMOTIONS = 1;
         to_promote = min(MAX_PROMOTIONS, len(state_variation_and_scores));
         have_promoted = [];
 
