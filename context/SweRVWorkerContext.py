@@ -5,13 +5,18 @@ import time;
 
 from simpletuner import CompileRequest;
 from simpletuner import CompileResult;
-from simpletuner import get_env_vc;
 from simpletuner import get_checksum_for_filename;
 
 class SweRVWorkerContext:
-    def __init__(self, idx, workspace):
+    @staticmethod
+    def get_available_benchmark_types() -> list:
+        return ["execution"];
+
+    def __init__(self, idx, workspace, cc, benchmark_type):
         self.idx = idx;
         self.workspace = workspace;
+        self.cc = cc;
+        self.benchmark_type = benchmark_type;
 
         self.env = os.environ.copy();
         self.env["RV_ROOT"] = self.workspace;
@@ -55,14 +60,14 @@ class SweRVWorkerContext:
         # Return True if score `x` is better than score `y`
         return x < y;
 
-    def worst_possible_result():
+    def worst_possible_result(self) -> float:
         # Return the worst possible result that is still
         # sortable. This is used internally to deal with tests that
         # fail, and thus should be pessimized as much as possible from
         # being selected to run again.
         return float('inf');
 
-    def compile(self, flags):
+    def compile(self, flags) -> CompileResult:
         clean = ["rm", "-f",
                  "cmark_iccm.dis",
                  "cmark_iccm.exe",
@@ -112,7 +117,7 @@ class SweRVWorkerContext:
             return CompileResult(False, None);
 
         # Get the checksum
-        checksum = get_checksum_for_filename(os.path.join(self.workspace, "cmark_iccm.exe"));
+        checksum = get_checksum_for_filename(os.path.join(self.workspace, "program.hex"));
 
         return CompileResult(True, checksum);
 
