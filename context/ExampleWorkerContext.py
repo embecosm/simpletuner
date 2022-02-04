@@ -66,7 +66,7 @@ class ExampleWorkerContext:
         # Absolute path to our workspace. We have free rein to do whatever we want here.
         self.workspace = workspace;
 
-
+        # The 'type' of benchmark that will be running. This will be provided by the user via the `--benchmark` flag.
         self.benchmark_type = benchmark_type;
 
         random.seed(self.idx);
