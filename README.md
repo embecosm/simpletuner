@@ -65,4 +65,44 @@ context
 └── SweRVWorkerContext.py
 ```
 
-The `ExampleWorkerContext.py` file provides a very simple worker context that shows how to implement the callbacks neccesary for Simpletuner to function.
+The `ExampleWorkerContext.py` file provides a very simple worker context that shows how to implement the callbacks neccesary for Simpletuner to function. Below is a brief summary of the class methods that you'll need to implement, and when Simpletuner will call them.
+
+```python
+class MyWorkerContext:
+    # Return the "type" of benchmark your Worker supports.
+    # This information will be used by the Simpletuner driver
+    # to check the user-supplied --benchmark flag.
+    @staticmethod
+    def get_available_benchmark_types() -> list:
+        return ["execution", "size"];
+
+    # Simpletuner will call this function when it first instantiates the class.
+    # `idx` is the numeric index of the current thread,
+    # `workspace` is the absolute path to a workspace created for the class,
+    # `cc` contains the absolute path to the C compiler,
+    # `benchmark_type` contains the user-provided `--benchmark` argument. This
+    #      is useful when you want to run either for size, execution speed, or
+    #      anything else.
+    def __init__(self, idx, workspace, cc, benchmark_type):
+
+    # Initialise workspace, whatever that may be.
+    # Simpletuner will call this function after it has created your directory and called
+    # your `__init__` function. The `workspace` parameter provided earlier in
+    # `__init__` is intended to be used here.
+    def init_workspace(self):
+
+    # Simpletuner will call this function to compare scores.
+    # Return `True` if score `x` is "better" than score `y`.
+    def better(self, x, y) -> float:
+
+    # Simpletuner will call this function when your `benchmark` or `compile` step fails
+    # for any reason. You want to return numerically the worst possible score, usually "ininity".
+    def worst_possible_result(self) -> float:
+        return float('inf');
+
+    # Simpletuner will call this function right before it calls your `benchmark` function.
+    def compile(self, flags) -> CompileResult:
+
+    # Simpletuner will call this to run your benchmark.
+    def benchmark(self):
+```

@@ -45,12 +45,12 @@ class ExampleWorkerContext:
         }
         """;
 
+    # Return the "type" of benchmark your Worker supports.
+
+    # This information will be used by the Simpletuner driver
+    # to check the user-supplied --benchmark flag.
     @staticmethod
     def get_available_benchmark_types() -> list:
-        # Return the "type" of benchmark your Worker supports.
-
-        # This information will be used by the Simpletuner driver
-        # to check the user-supplied --benchmark flag.
         return ["execution", "size"];
 
     def __init__(self, idx, workspace, cc, benchmark_type):
