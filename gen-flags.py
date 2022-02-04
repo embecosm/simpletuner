@@ -98,6 +98,13 @@ def discretise_params(params):
 
     return flags;
 
+def get_global_flags():
+    flags = [];
+
+    flags.append(Flag("-O", ["-O0", "-O1", "-O2", "-O3", "-Ofast", "-Og", "-Os"]));
+
+    return flags;
+
 def get_target_flags():
     logger = logging.getLogger("SimpleTuner-Driver")
     flags = [];
@@ -152,6 +159,9 @@ def main():
 
     target_flags = get_target_flags();
     flags += target_flags;
+
+    global_flags = get_global_flags();
+    flags += global_flags;
 
     # print(flags);
     print(json.dumps(flags, indent=4, cls=Flag.FlagEncoder));

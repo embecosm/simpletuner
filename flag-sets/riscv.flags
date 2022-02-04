@@ -6284,5 +6284,20 @@
         "state": 0,
         "n_states": 5,
         "exclusions": []
+    },
+    {
+        "name": "-O",
+        "flags": [
+            "-O0",
+            "-O1",
+            "-O2",
+            "-O3",
+            "-Ofast",
+            "-Og",
+            "-Os"
+        ],
+        "state": 0,
+        "n_states": 7,
+        "exclusions": []
     }
 ]
