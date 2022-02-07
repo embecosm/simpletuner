@@ -4,9 +4,9 @@ import logging;
 import time;
 import subprocess;
 
-from simpletuner import CompileRequest;
-from simpletuner import CompileResult;
-from simpletuner import get_checksum_for_filename;
+from common import CompileResult
+from common import CompileRequest;
+from common import get_checksum_for_filename;
 
 class ExampleWorkerContext:
     MAIN_C = \

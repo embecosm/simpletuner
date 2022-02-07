@@ -7,7 +7,6 @@ import logging;
 import multiprocessing as mp;
 import argparse;
 import importlib;
-import hashlib
 
 from flag import Flag;
 from gcc import GCCDriver;
@@ -36,8 +35,8 @@ parser.add_argument("--context", default=None,
 parser.add_argument("--benchmark", default=None,
                     help="Specify which benchmark to run. This parameter is specific to whatever worker context you selected in the --context parameter.");
 
-parser.add_argument("--flags-file", default=None,
-                    help="Specify .flags file that contains the flags to run Combined Elimination against.");
+parser.add_argument("--config", default=None,
+                    help="Specify a config file that contains the flags to run Combined Elimination against.");
 
 parser.add_argument("--cc", default=None,
                     help="C compiler to use for initial flag validation.");
@@ -52,31 +51,6 @@ args = parser.parse_args();
 workspace_file_all = None;
 workspace_file_stdout = None;
 workspace_file_stderr = None;
-
-class CompileRequest:
-    def __init__(self):
-        pass;
-
-class CompileResult:
-    def __init__(self, ok, checksum):
-        self.ok = ok;
-        self.checksum = checksum;
-
-# From here: https://stackoverflow.com/a/3431835
-def hash_bytestr_iter(bytesiter, hasher, ashexstr=True):
-    for block in bytesiter:
-        hasher.update(block)
-    return hasher.hexdigest() if ashexstr else hasher.digest()
-
-def file_as_blockiter(afile, blocksize=65536):
-    with afile:
-        block = afile.read(blocksize)
-        while len(block) > 0:
-            yield block
-            block = afile.read(blocksize)
-
-def get_checksum_for_filename(filename):
-    return hash_bytestr_iter(file_as_blockiter(open(filename, 'rb')), hashlib.sha256());
 
 def check_cc_flags_worker(work_queue, result_queue):
     while True:
@@ -155,7 +129,7 @@ def worker_func(worker_ctx, work_queue, result_queue, binary_checksum_result_cac
         if checksum in binary_checksum_result_cache:
             score = binary_checksum_result_cache[checksum];
             logger.debug("Hit cache result \"{}\"! Re-using result {}"\
-                         .format(idx, checksum, score));
+                         .format(checksum, score));
 
             result = (flags, state_variation, score);
             result_queue.put(result, block=False);
@@ -244,8 +218,8 @@ def work():
     logging.root.setLevel(logging.NOTSET);
     logger = logging.getLogger("SimpleTuner-Driver")
 
-    if args.flags_file is None:
-        logger.error("You must provide a .flags file to use for combined elimination. Please generate one, or use a pre-generated one from the flag-sets/ directory. Aborting.");
+    if args.config is None:
+        logger.error("You must provide a config file to use for combined elimination. Please generate one, or use a pre-generated one from the config/ directory. Aborting.");
         exit(1);
 
     if args.cc is not None:
@@ -313,7 +287,7 @@ def work():
     # it works at all.
     flags = [];
 
-    all_cc_flags = load_working_flags_from_filename(args.flags_file);
+    all_cc_flags = load_working_flags_from_filename(args.config);
 
     # Trim flags (useful for debug)
     # all_cc_flags = all_cc_flags[-20:-1];
@@ -491,6 +465,10 @@ def work():
             for state_variation, score in state_variation_and_scores:
                 flag_idx, state = state_variation;
                 print("{},{}".format(flags[flag_idx].values[state], score), file=file);
+
+        # Also write out the baseline flags to a separate file for ease of use
+        with open(os.path.join(run_directory, "iteration.{}.flags".format(n_iterations)), "w") as file:
+            print(" ".join(create_cmd_from_flaglist(baseline_flags)), file=file);
 
         # Now, we can do something to the baseline set of flags with
         # this information.

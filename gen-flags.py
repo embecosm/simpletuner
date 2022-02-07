@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-import sys
 import json
-import time;
 import logging;
 import argparse;
-from datetime import datetime;
 
 from flag import Flag;
 from gcc import GCCDriver;
 
-parser = argparse.ArgumentParser(description='Generate baseline flags file for use by simpletuner.');
+parser = argparse.ArgumentParser(description='Generate configuration file for use by simpletuner.');
 
 parser.add_argument("--cc", default=None,
                     help="C compiler to use for initial flag validation.");
@@ -21,7 +18,7 @@ parser.add_argument("--base-cflags", default=None,
 args = parser.parse_args();
 
 def discretise_params(params):
-    logger = logging.getLogger("get-flags.py");
+    logger = logging.getLogger("gen-flags.py");
     flags = [];
 
     for k, v in params.items():
@@ -151,6 +148,9 @@ def main():
 
     flags = [];
 
+    global_flags = get_global_flags();
+    flags += global_flags;
+
     params = driver.get_params(cflags);
     flags += discretise_params(params);
 
@@ -159,9 +159,6 @@ def main():
 
     target_flags = get_target_flags();
     flags += target_flags;
-
-    global_flags = get_global_flags();
-    flags += global_flags;
 
     # print(flags);
     print(json.dumps(flags, indent=4, cls=Flag.FlagEncoder));
