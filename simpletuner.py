@@ -35,10 +35,10 @@ parser.add_argument("--context", default=None,
 parser.add_argument("--benchmark", default=None,
                     help="Specify which benchmark to run. This parameter is specific to whatever worker context you selected in the --context parameter.");
 
-parser.add_argument("--config", default=None,
+parser.add_argument("--config", default=None, dest="path_config",
                     help="Specify a config file that contains the flags to run Combined Elimination against.");
 
-parser.add_argument("--cc", default=None,
+parser.add_argument("--cc", default=None, dest="path_cc",
                     help="C compiler to use for initial flag validation.");
 
 parser.add_argument("--setup-workspace-only", action="store_true",
@@ -63,7 +63,7 @@ def check_cc_flags_worker(work_queue, result_queue):
 
         result_queue.put((flag, flag_idx, state, ok), block=False);
 
-def check_cc_flags(driver, flags):
+def check_cc_flags(driver, config):
     work_queue = mp.Queue();
     result_queue = mp.Queue();
     n_workers = mp.cpu_count();
@@ -77,20 +77,20 @@ def check_cc_flags(driver, flags):
         worker.daemon = True;
         worker.start();
 
-    for flag_idx, flag in enumerate(flags):
+    for flag_idx, flag in enumerate(config.flags):
         for state in flag.all_states():
             work_queue.put((flag, flag_idx, state, driver), block=False);
 
     for _ in range(n_workers):
         work_queue.put(None, block=False);
 
-    for _ in flags:
+    for _ in config.flags:
         flag, flag_idx, state, ok = result_queue.get(block=True);
 
         if not ok:
-            flags[flag_idx].exclusions = flags[flag_idx].exclusions.union({state});
+            config.flags[flag_idx].exclusions = config.flags[flag_idx].exclusions.union({state});
 
-    return flags;
+    return config;
 
 def worker_func(worker_ctx, work_queue, result_queue, binary_checksum_result_cache):
     idx = worker_ctx.idx;
@@ -147,12 +147,58 @@ def worker_func(worker_ctx, work_queue, result_queue, binary_checksum_result_cac
         result = (flags, state_variation, score);
         result_queue.put(result, block=False);
 
-def create_cmd_from_flaglist(flaglist):
-    return [str(flag) for flag in flaglist];
+def create_cmd_from_flaglist(config):
+    return [config.base_opt] + [str(flag) for flag in config.flags];
 
-def load_working_flags_from_filename(filename):
+class Config:
+    def __init__(self, base_opt, flags):
+        self.base_opt = base_opt;
+        self.flags = flags;
+
+    class JSONDecoder(json.JSONDecoder):
+        def __init__(self, *args, **kwargs):
+            json.JSONDecoder.__init__(self, object_hook=self.object_hook, *args, **kwargs)
+
+        def object_hook(self, dct):
+            if "base_opt" in dct:
+                base_opt = dct["base_opt"];
+
+                flags = [];
+                for dct_flag in dct["flags"]:
+                    flag = Flag(dct_flag["name"], dct_flag["flags"]);
+                    flag.state = dct_flag["state"];
+                    flag.n_states = dct_flag["n_states"];
+                    flag.exclusions = set(dct_flag["exclusions"]);
+                    flags.append(flag);
+
+                config = Config(base_opt, flags);
+                return config;
+
+            else:
+                return dct;
+
+    class JSONEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, Config):
+                return {
+                    "base_opt": obj.base_opt,
+                    "flags": [
+                        {
+                            'name': flag.name,
+                            'flags': flag.values,
+                            'state': flag.state,
+                            'n_states': flag.n_states,
+                            'exclusions': list(flag.exclusions)
+                        } for flag in obj.flags
+                    ]
+                };
+
+            # Let the base class default method raise the TypeError
+            return json.JSONEncoder.default(self, obj)
+
+def load_config_from_filename(filename):
     with open(filename, "r") as file:
-        return json.loads(file.read(), cls=Flag.FlagDecoder);
+        return json.loads(file.read(), cls=Config.JSONDecoder);
 
 def create_run_directory(simpletuner_directory):
     random_suffix = "".join(
@@ -177,13 +223,13 @@ def create_workspace_directory():
 
     if os.path.isdir(simpletuner_directory):
         logging.info("Reusing simpletuner directory \"{}\""\
-                    .format(simpletuner_directory));
+                     .format(simpletuner_directory));
     else:
         try:
             os.mkdir(simpletuner_directory);
         except:
             logging.error("Failed to create top-level simpletuner directory \"{}\""\
-                         .format(simpletuner_directory));
+                          .format(simpletuner_directory));
             sys.exit(1);
 
     return simpletuner_directory;
@@ -207,7 +253,7 @@ def work():
 
     # Create logging formatter separately, to then apply to each stream handler as they're created:
     # https://stackoverflow.com/a/11582124
-    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(name)s: %(message)s')
+    formatter: logging.Formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(name)s: %(message)s')
 
     # Log output to file
     fh = logging.FileHandler(os.path.join(run_directory, "log.txt"));
@@ -218,12 +264,12 @@ def work():
     logging.root.setLevel(logging.NOTSET);
     logger = logging.getLogger("SimpleTuner-Driver")
 
-    if args.config is None:
+    if args.path_config is None:
         logger.error("You must provide a config file to use for combined elimination. Please generate one, or use a pre-generated one from the config/ directory. Aborting.");
         exit(1);
 
-    if args.cc is not None:
-        logger.info("Will be using the C compiler at \"{}\" to check flags.".format(args.cc));
+    if args.path_cc is not None:
+        logger.info("Will be using the C compiler at \"{}\" to check flags.".format(args.path_cc));
     else:
         logger.error("You must provide a path to a C compiler. Aborting.");
         exit(1);
@@ -287,37 +333,39 @@ def work():
     # it works at all.
     flags = [];
 
-    all_cc_flags = load_working_flags_from_filename(args.config);
+    config = load_config_from_filename(args.path_config);
 
     # Trim flags (useful for debug)
     # all_cc_flags = all_cc_flags[-20:-1];
 
-    driver = GCCDriver(args.cc);
+    driver = GCCDriver(args.path_cc);
 
-    all_cc_flags = check_cc_flags(driver, all_cc_flags);
+    config = check_cc_flags(driver, config);
 
     # Now, all_cc_flags may have excluded flags (because they
     # miscompiled.) It is not impossible that some flags had every
     # state excluded, and such flags we should simply remove from
     # consideration.
-    all_cc_flags = list(filter(lambda cc_flag: cc_flag.n_states > len(cc_flag.exclusions),
-                               all_cc_flags));
+    config.flags = list(filter(
+        lambda cc_flag: cc_flag.n_states > len(cc_flag.exclusions),
+        config.flags)
+    );
 
     # Calculate how many flag values we had in the beginning, and how many we have now.
-    len_all_cc_flags_before = sum([flag.n_states for flag in all_cc_flags]);
-    len_all_cc_flags_after = sum([flag.n_states - len(flag.exclusions) for flag in all_cc_flags]);
+    len_all_cc_flags_before = sum([flag.n_states for flag in config.flags]);
+    len_all_cc_flags_after = sum([flag.n_states - len(flag.exclusions) for flag in config.flags]);
 
     logger.info("flags before excluding broken flags: {} entries.".format(len_all_cc_flags_before));
     logger.info("flags after excluding broken flags: {} entries.".format(len_all_cc_flags_after));
 
     # Fixup the flag initial state. We want to pick state 0 as much as
     # possible, but if that became an excluded state after being tested, then we need to update it.
-    for flag in all_cc_flags:
+    for flag in config.flags:
         flag.state = flag.valid_states()[0];
 
-    flags = all_cc_flags;
+    # flags = config.flags;
 
-    if len(flags) == 0:
+    if len(config.flags) == 0:
         logger.error("After testing \"{}\" flags for function, we're left with 0"
                      " working flags! Maybe you're missing the C compiler or something?");
         sys.exit(1);
@@ -340,7 +388,7 @@ def work():
         worker_workspace = os.path.join(run_directory, str(idx));
 
         os.mkdir(worker_workspace);
-        worker_ctxs.append(WorkerContext(idx, worker_workspace, args.cc, args.benchmark));
+        worker_ctxs.append(WorkerContext(idx, worker_workspace, args.path_cc, args.benchmark));
 
     # Create shared dictionary mapping checksums to run times. This
     # avoids having to run binaries for which the result didn't
@@ -387,10 +435,10 @@ def work():
 
     ### Enter main loop:
     while True:
-        logger.debug("Running iteration {}".format(n_iterations));
+        logger.info("Running iteration {}".format(n_iterations));
 
         # First, get the baseline for the current flag configuration
-        work_queue.put((create_cmd_from_flaglist(flags), None), block=False);
+        work_queue.put((create_cmd_from_flaglist(config), None), block=False);
         result = result_queue.get(block=True);
 
         _, _, score = result;
@@ -399,22 +447,22 @@ def work():
             logger.fatal("Failed to get baseline: This is unrecoverable. It may be the case that there's one or two flags causing the failure.");
             sys.exit(1);
 
-        baseline_flags = flags;
+        baseline_config = config;
         baseline = score;
 
         # Instantiate all the jobs we're working on
         state_variation_and_scores = [];
         n_jobs = 0;
 
-        for flag_idx, flag in enumerate(flags):
+        for flag_idx, flag in enumerate(config.flags):
             for other_state in flag.other_states():
                 state_variation = (flag_idx, other_state)
                 state_variation_and_scores.append((state_variation, None));
 
-                state_variation_flags = copy.deepcopy(flags);
-                state_variation_flags[flag_idx].state = other_state;
+                state_variation_config = copy.deepcopy(config);
+                state_variation_config.flags[flag_idx].state = other_state;
 
-                work_queue.put((create_cmd_from_flaglist(state_variation_flags),
+                work_queue.put((create_cmd_from_flaglist(state_variation_config),
                                 state_variation),
                                block=False);
                 n_jobs += 1;
@@ -433,6 +481,7 @@ def work():
 
             job_flags, state_variation, score = result;
 
+            # FIXME: This should trigger some kind of assertion failure.
             if score is None:
                 score = float('inf');
 
@@ -457,18 +506,21 @@ def work():
 
         # Write out to file for debugging
         with open(os.path.join(run_directory, "iteration.{}".format(n_iterations)), "w") as file:
-            print("current flags: {}".format(" ".join(create_cmd_from_flaglist(baseline_flags))), file=file);
+            print("current flags: {}".format(" ".join(create_cmd_from_flaglist(baseline_config))), file=file);
             print("baseline: {}".format(baseline), file=file);
 
             print("State variations:", file=file);
 
             for state_variation, score in state_variation_and_scores:
                 flag_idx, state = state_variation;
-                print("{},{}".format(flags[flag_idx].values[state], score), file=file);
+                print("{},{}".format(config.flags[flag_idx].values[state], score), file=file);
 
         # Also write out the baseline flags to a separate file for ease of use
         with open(os.path.join(run_directory, "iteration.{}.flags".format(n_iterations)), "w") as file:
-            print(" ".join(create_cmd_from_flaglist(baseline_flags)), file=file);
+            print(" ".join(create_cmd_from_flaglist(baseline_config)), file=file);
+
+        with open(os.path.join(run_directory, "iteration.{}.config".format(n_iterations)), "w") as file:
+            print(json.dumps(obj=baseline_config, indent=4, cls=Config.JSONEncoder), file=file);
 
         # Now, we can do something to the baseline set of flags with
         # this information.
@@ -492,7 +544,7 @@ def work():
 
         for state_variation, score in state_variation_and_scores[-to_exclude:]:
             flag_idx, other_state = state_variation;
-            flags[flag_idx].exclusions = flags[flag_idx].exclusions.union({other_state});
+            config.flags[flag_idx].exclusions = config.flags[flag_idx].exclusions.union({other_state});
 
         # Promote some flags to the best states.
         MAX_PROMOTIONS = 1;
@@ -514,9 +566,9 @@ def work():
             have_promoted.append(flag_idx);
 
             # We don't want to go back to the old state... or do we?
-            current_state = flags[flag_idx].state;
-            flags[flag_idx].exclusions = flags[flag_idx].exclusions.union({current_state});
-            flags[flag_idx].state = other_state;
+            current_state = config.flags[flag_idx].state;
+            config.flags[flag_idx].exclusions = config.flags[flag_idx].exclusions.union({current_state});
+            config.flags[flag_idx].state = other_state;
 
         # Now that we've adjusted the current flag state, go to the next iteration.
         n_iterations += 1;
