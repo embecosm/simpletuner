@@ -115,7 +115,10 @@ class GCCDriver:
         stdout, stderr = res.communicate();
 
         if res.returncode != 0:
-            # self.logger.info("gcc exited with {}".format(res.returncode));
+            logging.error("gcc exited with return code {}:".format(res.returncode));
+            logging.error("Invocation: \"{}\"".format(" ".join(cmd)));
+            logging.error("stderr:");
+            logging.error(stderr.decode("utf-8"));
             sys.exit(1);
 
         stdout = stdout.decode("utf-8").strip();
@@ -399,7 +402,7 @@ def main():
     );
 
     # Set the priority to NOTSET (i.e. report everything.)
-    logging.root.setLevel(logging.NOTSET);
+    logging.root.setLevel(logging.INFO);
 
     gcc = GCCDriver("/home/maxim/Downloads/riscv32-embecosm-ubuntu1804-gcc11.2.0/bin", "riscv32-unknown-elf-");
     print("GCC Version: {}".format(gcc.get_version()));
