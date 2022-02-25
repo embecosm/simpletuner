@@ -9,15 +9,26 @@ Simpletuner comes pre-prepared with two example projects to optimize:
 
 ### Running Simpletuner on native machine
 Running Simpletuner is a two-step process:
-1) Generate the flags file the Combined Elimination will use:
+#### 1) Generate the flags file the Combined Elimination will use:
 ```
-$ ./gen-flags.py --cc $(which gcc) > flag-sets/my-flag-set.flags
+$ ./gen-flags.py --base-opt O2 --cc $(which gcc) > config/my-flag-set.json
 ```
-2) Run Simpletuner, optimising the example project for size using the above flags:
+ - `--base-opt O2`: Use the `-O2` optimisation flag as the "base" for the configuration.
+ - `--cc`: The C compiler to use.
+
+#### 2) Run Simpletuner, optimising the example project for size using the above flags:
 ```
-$ ./simpletuner.py --context ExampleWorkerContext --benchmark size --flags-file flag-sets/my-flag-set.flags --cc $(which gcc) -j $(nproc)
+$ ./simpletuner.py --context ExampleWorkerContext --benchmark size --config config/riscv.O2.json --cc $(which gcc) -j $(nproc)
 ```
-This will start a lengthy Combined Elimination run for the `ExampleWorkerContext` (with a very noisy log output) accross `nproc` threads for the native system compiler.
+ - `--context ExampleWorkerContext`: use the `ExampleWorkerContext` class implemented in `context/ExampleWorkerContext.py`.
+ - `--benchmark size`: Optimise the flags for the `size` benchmark, the implementation of which is provided by the `ExampleWorkerClass` class. Note that this parameter will be specific to each context class, and context classes provide simpletuner with information of what benchmarks they support.
+ - `--config flags/riscv.O2.json`: Use the provided configuration as the starting point for optimisation. `config/riscv.O2.json` is provided as part of this repository, however you can generate your own configuration if you wish.
+ - `--cc`: The C compiler to use. Note that its the reponsibility of the context class to actually play nice and use this parameter. Nothing is stopping you from calling your own arbitrary C compiler from within the context class `compile()` method hook, but you should honour this parameter if you can.
+ - `-j`: Number of threads to start. More = Better.
+
+This will start a lengthy Combined Elimination run for the `ExampleWorkerContext` (with a very noisy log output) across `nproc` threads for the native system compiler.
+
+#### Live output viewing
 
 To view the live output, look into the `workspace/` directory (which should be created when running `simpletuner` for the first time), and look into the latest directory. Every time you run `./simpletuner`, the script will generate a timestamped directory under the `workspace/` directory which will contain all the data and output for the current invocation.
 Typically it might look something like this:
@@ -47,11 +58,11 @@ Running the ChipsAlliance SweRV EH1 core is a bit more involved. the `eh1/` dire
 
 By running `$ make all` in the `eh1/` directory, the Makefile should do the above and finally generate the file `eh1.tar.gz`.
 
-You won't have to generate the flags file for this project - you can just use the `flag-sets/riscv.flags` flag set.
+You won't have to generate the flags file for this project - you can just use the `config/riscv.O2.json` flag set.
 
 Make sure that you have a `riscv32-unknown-elf-gcc` compiler in your path, (you can download an upstream `riscv32` compiler from [here](https://www.embecosm.com/resources/tool-chain-downloads/#riscv-stable)), and invoke the `simpletuner` script as follows:
 ```commandline
-SWERV_SOURCE_TAR=$(realpath eh1/eh1.tar.gz) ./simpletuner.py -j 8 --context SweRVWorkerContext --benchmark execute --flags-file flag-sets/riscv.flags --cc [path to riscv32-unknown-elf-gcc]
+SWERV_SOURCE_TAR=$(realpath eh1/eh1.tar.gz) ./simpletuner.py -j 8 --context SweRVWorkerContext --benchmark execute --config config/riscv.O2.json --cc [path to riscv32-unknown-elf-gcc]
 ```
 
 ## Creating custom worker contexts
