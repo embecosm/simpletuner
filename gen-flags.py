@@ -2,18 +2,27 @@
 import json
 import logging;
 import argparse;
+import enum;
+from typing import List
 
 from flag import Flag;
 from gcc import GCCDriver;
+
+GCCBaseOpt = enum.Enum("GCCBaseOpt",
+                       ("O0", "O1", "O2", "O3", "Ofast", "Os", "Og"));
 
 parser = argparse.ArgumentParser(description='Generate configuration file for use by simpletuner.');
 
 parser.add_argument("--cc", default=None,
                     help="C compiler to use for initial flag validation.");
 
-parser.add_argument("--base-cflags", default=None,
-                    metavar='-flag', type=str, nargs='+',
-                    help="C flags to start with. These can help speed up combined elimination. If you're trying to minimize size, try '-Os'. If you're trying to maximise performance, try '-O3' or '-Ofast'.");
+parser.add_argument("--base-opt",
+                    metavar='',
+                    type=str,
+                    action="store",
+                    choices=tuple(t.name for t in GCCBaseOpt),
+                    default=GCCBaseOpt.O2.name,
+                    help="C flags to start with. These can help the combined elimination process to find a local optimum faster. If you're trying to minimize size, try 'Os'. If you're trying to maximise performance, try 'O3' or 'Ofast'. Possible values: " + ", ".join([t.name for t in GCCBaseOpt]));
 
 args = parser.parse_args();
 
@@ -127,7 +136,7 @@ def main():
     logging.basicConfig(format="[%(levelname)s] %(name)s: %(message)s");
     logger = logging.getLogger("gen-flags.py");
 
-    logging.root.setLevel(logging.NOTSET);
+    logging.root.setLevel(logging.INFO);
 
     if args.cc is not None:
         logger.info("Will be using the C compiler at \"{}\" to check flags.".format(args.cc));
@@ -139,29 +148,31 @@ def main():
     logger.info("GCC Version: {}".format(driver.get_version()));
     logger.info("GCC Target: {}".format(driver.get_target()));
 
-    if args.base_cflags is not None:
-        logger.info("Will be using the following base C flags: \"{}\"".format(args.base_cflags));
-        cflags = [e.strip() for e in args.base_cflags.split()]
-    else:
-        logger.warning("No base C flags provided: This may pessimize combined elimination results. Continuing anyway...");
-        cflags = [];
+    logger.info("Will be using the following base optimisation: \"{}\"".format(args.base_opt));
+    base_opt = "-" + args.base_opt;
+    base_flags = [base_opt];
 
     flags = [];
 
-    global_flags = get_global_flags();
-    flags += global_flags;
-
-    params = driver.get_params(cflags);
+    params = driver.get_params(base_flags);
     flags += discretise_params(params);
 
-    optimizations = driver.get_optimizations(cflags);
+    optimizations = driver.get_optimizations(base_flags);
     flags += optimizations;
 
     target_flags = get_target_flags();
     flags += target_flags;
 
-    # print(flags);
-    print(json.dumps(flags, indent=4, cls=Flag.FlagEncoder));
+    config = {
+        'base_opt': base_opt,
+        'flags': flags
+    }
+
+    try:
+        print(json.dumps(config, indent=4, cls=Flag.FlagEncoder));
+    except BrokenPipeError as _:
+        pass;
+
 
 if __name__ == "__main__":
     main();
