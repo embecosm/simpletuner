@@ -1,0 +1,231 @@
+{
+    "base_opt": "-Os",
+    "flags": [
+        {
+            "name": "-funsafe-math-optimizations",
+            "flags": [
+                "-fno-unsafe-math-optimizations",
+                "-funsafe-math-optimizations"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-fsingle-precision-constant",
+            "flags": [
+                "-fno-single-precision-constant",
+                "-fsingle-precision-constant"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-ftree-coalesce-vars",
+            "flags": [
+                "-ftree-coalesce-vars",
+                "-fno-tree-coalesce-vars"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-fforward-propagate",
+            "flags": [
+                "-fforward-propagate",
+                "-fno-forward-propagate"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "max-jump-thread-duplication-stmts",
+            "flags": [
+                "--param=max-jump-thread-duplication-stmts=15",
+                "--param=max-jump-thread-duplication-stmts=0",
+                "--param=max-jump-thread-duplication-stmts=3",
+                "--param=max-jump-thread-duplication-stmts=6",
+                "--param=max-jump-thread-duplication-stmts=9",
+                "--param=max-jump-thread-duplication-stmts=12",
+                "--param=max-jump-thread-duplication-stmts=18",
+                "--param=max-jump-thread-duplication-stmts=21",
+                "--param=max-jump-thread-duplication-stmts=24",
+                "--param=max-jump-thread-duplication-stmts=27",
+                "--param=max-jump-thread-duplication-stmts=30"
+            ],
+            "state": 0,
+            "n_states": 11,
+            "exclusions": []
+        },
+        {
+            "name": "-frename-registers",
+            "flags": [
+                "-frename-registers",
+                "-fno-rename-registers"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-fshrink-wrap",
+            "flags": [
+                "-fshrink-wrap",
+                "-fno-shrink-wrap"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-ftree-dominator-opts",
+            "flags": [
+                "-ftree-dominator-opts",
+                "-fno-tree-dominator-opts"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "sink-frequency-threshold",
+            "flags": [
+                "--param=sink-frequency-threshold=75",
+                "--param=sink-frequency-threshold=0",
+                "--param=sink-frequency-threshold=10",
+                "--param=sink-frequency-threshold=20",
+                "--param=sink-frequency-threshold=30",
+                "--param=sink-frequency-threshold=40",
+                "--param=sink-frequency-threshold=50",
+                "--param=sink-frequency-threshold=60",
+                "--param=sink-frequency-threshold=70",
+                "--param=sink-frequency-threshold=80",
+                "--param=sink-frequency-threshold=90",
+                "--param=sink-frequency-threshold=100"
+            ],
+            "state": 0,
+            "n_states": 12,
+            "exclusions": []
+        },
+        {
+            "name": "-fdse",
+            "flags": [
+                "-fdse",
+                "-fno-dse"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-frerun-cse-after-loop",
+            "flags": [
+                "-frerun-cse-after-loop",
+                "-fno-rerun-cse-after-loop"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-ftree-forwprop",
+            "flags": [
+                "-ftree-forwprop",
+                "-fno-tree-forwprop"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-frename-registers",
+            "flags": [
+                "-frename-registers",
+                "-fno-rename-registers"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-msave-restore",
+            "flags": [
+                "-msave-restore",
+                "-mno-save-restore"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "loop-invariant-max-bbs-in-loop",
+            "flags": [
+                "--param=loop-invariant-max-bbs-in-loop=10000",
+                "--param=loop-invariant-max-bbs-in-loop=0",
+                "--param=loop-invariant-max-bbs-in-loop=2000",
+                "--param=loop-invariant-max-bbs-in-loop=4000",
+                "--param=loop-invariant-max-bbs-in-loop=6000",
+                "--param=loop-invariant-max-bbs-in-loop=8000",
+                "--param=loop-invariant-max-bbs-in-loop=12000",
+                "--param=loop-invariant-max-bbs-in-loop=14000",
+                "--param=loop-invariant-max-bbs-in-loop=16000",
+                "--param=loop-invariant-max-bbs-in-loop=18000",
+                "--param=loop-invariant-max-bbs-in-loop=20000"
+            ],
+            "state": 0,
+            "n_states": 11,
+            "exclusions": []
+        },
+        {
+            "name": "-msmall-data-limit",
+            "flags": [
+                "-msmall-data-limit=0",
+                "-msmall-data-limit=1",
+                "-msmall-data-limit=2",
+                "-msmall-data-limit=3",
+                "-msmall-data-limit=4",
+                "-msmall-data-limit=5",
+                "-msmall-data-limit=6",
+                "-msmall-data-limit=7",
+                "-msmall-data-limit=8",
+                "-msmall-data-limit=9",
+                "-msmall-data-limit=10",
+                "-msmall-data-limit=11",
+                "-msmall-data-limit=12",
+                "-msmall-data-limit=13",
+                "-msmall-data-limit=14",
+                "-msmall-data-limit=15",
+                "-msmall-data-limit=16",
+                "-msmall-data-limit=17",
+                "-msmall-data-limit=18",
+                "-msmall-data-limit=19"
+            ],
+            "state": 0,
+            "n_states": 20,
+            "exclusions": []
+        },
+        {
+            "name": "iv-max-considered-uses",
+            "flags": [
+                "--param=iv-max-considered-uses=250",
+                "--param=iv-max-considered-uses=0",
+                "--param=iv-max-considered-uses=50",
+                "--param=iv-max-considered-uses=100",
+                "--param=iv-max-considered-uses=150",
+                "--param=iv-max-considered-uses=200",
+                "--param=iv-max-considered-uses=300",
+                "--param=iv-max-considered-uses=350",
+                "--param=iv-max-considered-uses=400",
+                "--param=iv-max-considered-uses=450",
+                "--param=iv-max-considered-uses=500"
+            ],
+            "state": 0,
+            "n_states": 11,
+            "exclusions": []
+        },
+    ]
+}
+
