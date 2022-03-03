@@ -148,7 +148,7 @@ def worker_func(worker_ctx, work_queue, result_queue, binary_checksum_result_cac
         result_queue.put(result, block=False);
 
 def create_cmd_from_flaglist(config):
-    return [config.base_opt] + [str(flag) for flag in config.flags];
+    return [config.base_opt] + [str(flag) for flag in config.flags if flag.state != 0];
 
 class Config:
     def __init__(self, base_opt, flags):
@@ -527,16 +527,16 @@ def work():
 
         # ...If noone beat the baseline, then actually we don't have any more work to do.
 
-        # have_better_than_baseline_p = False;
-        # for state_variation, score in state_variation_and_scores:
-        #     if score < baseline:
-        #         have_better_than_baseline_p = True;
-        #         break;
+        have_better_than_baseline_p = False;
+        for state_variation, score in state_variation_and_scores:
+            if score < baseline:
+                have_better_than_baseline_p = True;
+                break;
 
-        # if not have_better_than_baseline_p:
-        #     info("Iteration {}: No state variable variation managed to beat the current baseline of {}: Exiting."\
-        #          .format(n_iterations, baseline));
-        #     break;
+        if not have_better_than_baseline_p:
+            logger.info("Iteration {}: No state variable variation managed to beat the current baseline of {}: Exiting."\
+                        .format(n_iterations, baseline));
+            break;
 
         # Exclude some flags from the worst states.
         MAX_EXCLUSIONS = 3;
