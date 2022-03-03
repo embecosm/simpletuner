@@ -150,7 +150,7 @@ def worker_func(worker_ctx, work_queue, result_queue, binary_checksum_result_cac
         result_queue.put(result, block=False);
 
 def create_cmd_from_flaglist(config):
-    return [config.base_opt] + [str(flag) for flag in config.flags if flag.state != 0];
+    return [config.base_opt] + [str(flag) for flag in config.flags];
 
 class Config:
     def __init__(self, base_opt, flags):
