@@ -46,7 +46,7 @@ parser.add_argument("--setup-workspace-only", action="store_true",
                     " worker thread. Useful for when debugging your"
                     " worker context's `init_workspace` procedure.");
 
-parser.add_argument("--drop-pessimizing-flags", action="store_true");
+parser.add_argument("--drop-unimproving-flags", action="store_true");
 
 args = parser.parse_args();
 
@@ -548,9 +548,9 @@ def work():
         #     flag_idx, other_state = state_variation;
         #     config.flags[flag_idx].exclusions = config.flags[flag_idx].exclusions.union({other_state});
 
-        if args.drop_pessimizing_flags:
+        if args.drop_unimproving_flags:
             for state_variation, score in state_variation_and_scores:
-                if score < baseline:
+                if score <= baseline:
                     flag_idx, other_state = state_variation;
                     config.flags[flag_idx].exclusions = config.flags[flag_idx].exclusions.union({other_state});
 
