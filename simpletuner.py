@@ -46,8 +46,6 @@ parser.add_argument("--setup-workspace-only", action="store_true",
                     " worker thread. Useful for when debugging your"
                     " worker context's `init_workspace` procedure.");
 
-parser.add_argument("--drop-unimproving-flags", action="store_true");
-
 args = parser.parse_args();
 
 workspace_file_all = None;
@@ -529,39 +527,31 @@ def work():
 
         # ...If noone beat the baseline, then actually we don't have any more work to do.
 
-        have_better_than_baseline_p = False;
-        for state_variation, score in state_variation_and_scores:
-            if score < baseline:
-                have_better_than_baseline_p = True;
-                break;
+        # have_better_than_baseline_p = False;
+        # for state_variation, score in state_variation_and_scores:
+        #     if score < baseline:
+        #         have_better_than_baseline_p = True;
+        #         break;
 
-        if not have_better_than_baseline_p:
-            logger.info("Iteration {}: No state variable variation managed to beat the current baseline of {}: Exiting."\
-                 .format(n_iterations, baseline));
-            break;
+        # if not have_better_than_baseline_p:
+        #     info("Iteration {}: No state variable variation managed to beat the current baseline of {}: Exiting."\
+        #          .format(n_iterations, baseline));
+        #     break;
 
         # Exclude some flags from the worst states.
-        # MAX_EXCLUSIONS = 3;
-        # to_exclude = min(MAX_EXCLUSIONS, len(state_variation_and_scores));
-        #
-        # for state_variation, score in state_variation_and_scores[-to_exclude:]:
-        #     flag_idx, other_state = state_variation;
-        #     config.flags[flag_idx].exclusions = config.flags[flag_idx].exclusions.union({other_state});
+        MAX_EXCLUSIONS = 3;
+        to_exclude = min(MAX_EXCLUSIONS, len(state_variation_and_scores));
 
-        if args.drop_unimproving_flags:
-            for state_variation, score in state_variation_and_scores:
-                if score <= baseline:
-                    flag_idx, other_state = state_variation;
-                    config.flags[flag_idx].exclusions = config.flags[flag_idx].exclusions.union({other_state});
-
-        improved_state_variation_and_scores = [e for e in state_variation_and_scores if e[1] > baseline];
+        for state_variation, score in state_variation_and_scores[-to_exclude:]:
+            flag_idx, other_state = state_variation;
+            config.flags[flag_idx].exclusions = config.flags[flag_idx].exclusions.union({other_state});
 
         # Promote some flags to the best states.
         MAX_PROMOTIONS = 1;
-        to_promote = min(MAX_PROMOTIONS, len(improved_state_variation_and_scores));
+        to_promote = min(MAX_PROMOTIONS, len(state_variation_and_scores));
         have_promoted = [];
 
-        for state_variation, score in improved_state_variation_and_scores[0 : to_promote]:
+        for state_variation, score in state_variation_and_scores[0 : to_promote]:
             flag_idx, other_state = state_variation;
 
             # We don't want to re-promote a flag index that we've
