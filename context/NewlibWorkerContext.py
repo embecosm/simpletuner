@@ -112,6 +112,22 @@ class NewlibWorkerContext:
     # that is, if flag 'A' and flag 'B' both generate the exact same executable, it doesn't
     # make sense to run both, since they will both run the same way. In this case, Simpletuner
     # will skip the `benchmark` step for a flag for which it already has a cached entry.
+    def newlib_clean(self, flags):
+        cmd = [
+            'make',
+            'clean'
+        ];
+
+        res = subprocess.Popen(cmd,
+                               cwd=self.newlib_build_dir,
+                               stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE);
+
+        stdout, stderr = res.communicate();
+
+        return ProcessResult(res.returncode, stdout, stderr)
+
     def newlib_configure(self, flags):
         CC = " ".join([
             'riscv32-unknown-elf-gcc',
@@ -169,6 +185,13 @@ class NewlibWorkerContext:
 
     def compile(self, flags) -> CompileResult:
         self.logger.debug("[{}]: compile(): Building newlib".format(self.workspace));
+
+        if len(os.listdir(self.newlib_build_dir)) != 0:
+            configure = self.newlib_clean(flags);
+            if configure.returncode != 0:
+                self.logger.error("[{}]: newlib_configure(): Exit code {}: Failed to compile:" \
+                                  .format(self.workspace, configure.returncode, configure.stderr));
+                return CompileResult(False, None);
 
         configure = self.newlib_configure(flags);
         if configure.returncode != 0:
