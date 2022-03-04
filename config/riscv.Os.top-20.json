@@ -2,6 +2,82 @@
     "base_opt": "-Os",
     "flags": [
         {
+            "name": "align-loop-iterations",
+            "flags": [
+                "--param=align-loop-iterations=4",
+                "--param=align-loop-iterations=0",
+                "--param=align-loop-iterations=1",
+                "--param=align-loop-iterations=2",
+                "--param=align-loop-iterations=3",
+                "--param=align-loop-iterations=5",
+                "--param=align-loop-iterations=6",
+                "--param=align-loop-iterations=7",
+                "--param=align-loop-iterations=8"
+            ],
+            "state": 0,
+            "n_states": 9,
+            "exclusions": []
+        },
+        {
+            "name": "sccvn-max-alias-queries-per-access",
+            "flags": [
+                "--param=sccvn-max-alias-queries-per-access=1000",
+                "--param=sccvn-max-alias-queries-per-access=0",
+                "--param=sccvn-max-alias-queries-per-access=200",
+                "--param=sccvn-max-alias-queries-per-access=400",
+                "--param=sccvn-max-alias-queries-per-access=600",
+                "--param=sccvn-max-alias-queries-per-access=800",
+                "--param=sccvn-max-alias-queries-per-access=1200",
+                "--param=sccvn-max-alias-queries-per-access=1400",
+                "--param=sccvn-max-alias-queries-per-access=1600",
+                "--param=sccvn-max-alias-queries-per-access=1800",
+                "--param=sccvn-max-alias-queries-per-access=2000"
+            ],
+            "state": 0,
+            "n_states": 11,
+            "exclusions": []
+        },
+        {
+            "name": "-fcse-follow-jumps",
+            "flags": [
+                "-fcse-follow-jumps",
+                "-fno-cse-follow-jumps"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-ffinite-math-only",
+            "flags": [
+                "-fno-finite-math-only",
+                "-ffinite-math-only"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-flive-range-shrinkage",
+            "flags": [
+                "-fno-live-range-shrinkage",
+                "-flive-range-shrinkage"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
+            "name": "-fsplit-wide-types-early",
+            "flags": [
+                "-fno-split-wide-types-early",
+                "-fsplit-wide-types-early"
+            ],
+            "state": 0,
+            "n_states": 2,
+            "exclusions": []
+        },
+        {
             "name": "-funsafe-math-optimizations",
             "flags": [
                 "-fno-unsafe-math-optimizations",
