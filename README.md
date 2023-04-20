@@ -1,5 +1,18 @@
+<!---
+
+README for SimpleTuner
+
+Copyright (C) 2021-2023 Embecosm <www.embecosm.com>
+Contributor Maxim Blinov <maxim.blinov@embecosm.com>
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+
+--->
+
 # Simpletuner
-Tool for running Combined Elimination against custom projects.
+Tool for running Combined Elimination against custom projects. The tool was originally created by Maxim Blinov of Embecosm.
+
+The project is made freely available under the GPL 3.0 license (for code), and the Creative Commons Attribution-ShareAlike 4.0 International license (for documentation).
 
 ## Quickstart
 Simpletuner comes pre-prepared with two example projects to optimize:

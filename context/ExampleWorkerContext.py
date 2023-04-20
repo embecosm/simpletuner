@@ -1,3 +1,12 @@
+# Example worker context
+
+# This file is part of SimpleTuner
+
+# Copyright (C) 2021-2023 Embecosm <www.embecosm.com>
+# Contributor Maxim Blinov <maxim.blinov@embecosm.com>
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import os;
 import random;
 import logging;
@@ -12,20 +21,20 @@ class ExampleWorkerContext:
     MAIN_C = \
         """
         #include <stdio.h>
-        
+
         #define ELEMS (1 << 10)
-        
+
         size_t elems = ELEMS;
         struct { float x, y, z, w; } src[ELEMS], dst[ELEMS];
-        
+
         void work (void);
-        
+
         int
         main (void)
         {
           for (int i = 0; i < 1E6; ++i)
             work ();
-        
+
           return 0;
         }
         """;
@@ -33,10 +42,10 @@ class ExampleWorkerContext:
     WORK_C = \
         """
         #include <stdio.h>
-        
+
         extern size_t elems;
         extern struct { float x, y, z, w; } src[], dst[];
-        
+
         void
         work (void)
         {

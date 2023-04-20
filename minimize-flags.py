@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+
+# Flag optimization
+
+# This file is part of SimpleTuner
+
+# Copyright (C) 2021-2023 Embecosm <www.embecosm.com>
+# Contributor Maxim Blinov <maxim.blinov@embecosm.com>
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import copy;
 import logging;
 import argparse;
